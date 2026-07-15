@@ -10,7 +10,6 @@ class MWVCInstance:
         self.adj_matrix = []
         self.edges = []
         self.adj_list = [] # Lista di adiacenza per calcoli super-veloci
-
         
         if filepath:
             with open(filepath, 'r') as f:
@@ -251,13 +250,14 @@ class ClonalSelection:
 
             self.population = unique_pop
             
-            if generation % 5 == 0:
-                print(f"Gen {generation} | FE: {self.evals}/{self.max_evals} | Pop_Best: {self.population[0]['cost']} | MEMORY_BEST: {self.memory[0]['cost']}")
-
             # --- AGGIORNAMENTO CONVERGENZA ---
             if self.memory[0]['cost'] < self.best_cost_tracker:
                 self.best_cost_tracker = self.memory[0]['cost']
                 self.convergence_eval = self.evals
+            
+            if generation % 10 == 0:
+                print(f"Gen {generation} | FE: {self.evals}/{self.max_evals} | Pop_Best: {self.population[0]['cost']} | MEMORY_BEST: {self.memory[0]['cost']}")
+
         # Alla fine, la soluzione assoluta viene estratta dalla Memoria Immunitaria
         print(f"\n[!] Ricerca completata! Miglior costo finale (Memory Cell): {self.memory[0]['cost']}")
         return self.memory[0]
@@ -273,7 +273,15 @@ if __name__ == "__main__":
     cartella_istanze = "wvcp-instances/wvcp-instances" 
     
     # Valori di riferimento (paper 2012)
+    # 💡 TRUCCO: Commenta o elimina una riga qui sotto per NON eseguire quella famiglia!
     BENCHMARK_TARGETS = {
+        "vc_20_60": {"avg": 861.8, "eval": 7.7},
+        "vc_20_120": {"avg": 1038.2, "eval": 5.2},
+        "vc_25_150": {"avg": 1264.0, "eval": 21.0},
+
+    }
+
+    ALL_BENCHMARK_TARGETS = {
         "vc_20_60": {"avg": 861.8, "eval": 7.7},
         "vc_20_120": {"avg": 1038.2, "eval": 5.2},
         "vc_25_150": {"avg": 1264.0, "eval": 21.0},
@@ -285,36 +293,42 @@ if __name__ == "__main__":
     }
     
     print("\n" + "="*80)
-    print(" AVVIO BENCHMARK GLOBALE SU TUTTA LA CARTELLA (COSTI & EVALS)")
+    print(" AVVIO BENCHMARK GLOBALE (FILTRATO PER TARGETS)")
     print("="*80)
     
     if not os.path.exists(cartella_istanze):
         print(f"\n[-] ERRORE CRITICO: La cartella '{cartella_istanze}' non esiste!")
         sys.exit(1)
         
-    tutti_i_file = [f for f in os.listdir(cartella_istanze) if f.endswith('.txt')]
-    tutti_i_file.sort()
+    # Leggiamo tutti i file txt nella cartella
+    file_nella_cartella = [f for f in os.listdir(cartella_istanze) if f.endswith('.txt')]
+    tutti_i_file = []
     
-    if not tutti_i_file:
-        print(f"\n[-] ERRORE CRITICO: Nessun file .txt trovato in '{cartella_istanze}'!")
-        sys.exit(1)
-        
-    print(f"[*] Trovate {len(tutti_i_file)} istanze. Inizio elaborazione...\n")
-    
-    # Dizionario per accumulare costi e valutazioni per ogni famiglia
-    # Struttura: {'vc_20_60': {'costi': [], 'evals': []}, ...}
-    risultati_raggruppati = defaultdict(lambda: {'costi': [], 'evals': []})
-
-    # 2. Esecuzione su tutta la cartella
-    for nome_file in tutti_i_file:
-        percorso_completo = os.path.join(cartella_istanze, nome_file)
-        
-        # Estrai la famiglia dal nome del file
+    # Filtriamo dinamicamente in base a cosa c'è in BENCHMARK_TARGETS
+    for nome_file in file_nella_cartella:
         parti_nome = nome_file.replace('.txt', '').split('_')
         if len(parti_nome) >= 3:
             famiglia = f"{parti_nome[0]}_{parti_nome[1]}_{parti_nome[2]}"
-        else:
-            famiglia = "Altro"
+            # Aggiunge alla lista esecutiva SOLO se la famiglia è nel dizionario
+            if famiglia in BENCHMARK_TARGETS:
+                tutti_i_file.append(nome_file)
+                
+    tutti_i_file.sort()
+    
+    if not tutti_i_file:
+        print(f"\n[-] ERRORE CRITICO: Nessun file corrispondente ai target trovato in '{cartella_istanze}'!")
+        sys.exit(1)
+        
+    print(f"[*] Trovate {len(tutti_i_file)} istanze valide. Inizio elaborazione...\n")
+    
+    # Dizionario per accumulare costi e valutazioni
+    risultati_raggruppati = defaultdict(lambda: {'costi': [], 'evals': []})
+
+    for nome_file in tutti_i_file:
+        percorso_completo = os.path.join(cartella_istanze, nome_file)
+        
+        parti_nome = nome_file.replace('.txt', '').split('_')
+        famiglia = f"{parti_nome[0]}_{parti_nome[1]}_{parti_nome[2]}"
             
         print(f"[*] Elaborazione: {nome_file:<20} ...", end=" ", flush=True)
         
@@ -326,11 +340,10 @@ if __name__ == "__main__":
             
         start_time = time.time()
         
-        algoritmo = ClonalSelection(istanza, pop_size=50, max_evals=20000)
+        algoritmo = ClonalSelection(istanza, pop_size=20, max_evals=20000)
         miglior_soluzione = algoritmo.run()
         
         elapsed_time = time.time() - start_time
-        
         costo_istanza = miglior_soluzione['cost']
         eval_convergenza = algoritmo.convergence_eval
         
@@ -339,7 +352,6 @@ if __name__ == "__main__":
         
         print(f"Fatto! Costo: {costo_istanza:.1f} | FE: {eval_convergenza} | Tempo: {elapsed_time:.2f}s")
 
-    # 3. Valutazione e Confronto con i Benchmark
     print("\n\n" + "#"*80)
     print(" REPORT DI VALUTAZIONE FINALE (Confronto con PBIG/ACO)")
     print("#"*80)
@@ -381,11 +393,6 @@ if __name__ == "__main__":
                 
                 print(f"  [BEST ] Best CLONALG:  \t{best_costo:.2f}")
                 print(f"  [BEST ] Best Target:   \t{target['best']:.2f} \t[{segno_best}{diff_best:.2f} -> {val_best}]")
-        else:
-            print(f"  [COSTO] Media Calcolata:\t{media_costo:.2f}")
-            print(f"  [EVALS] Media Evals:    \t{media_eval:.1f} FE")
-            print(f"  (Nessun target inserito per questa famiglia)")
 
     print("\n" + "="*80)
     print(" TEST MASSIVO COMPLETATO!")
-
