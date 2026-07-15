@@ -42,15 +42,22 @@ class MWVCInstance:
 class ClonalSelection:
     """
     Algoritmo basato sul Principio di Selezione Clonale (Artificial Immune System)
-    Vera implementazione CLONALG con Memoria separata e Affinità normalizzata.
+    Versione "Champion": massimizza la qualità della ricerca (best cost) mantenendo un'alta diversità.
     """
-    def __init__(self, instance, pop_size=50, max_evals=20000):
+    def __init__(self, instance, pop_size=None, max_evals=20000):
         self.instance = instance
-        self.pop_size = pop_size
+        
+        # NUOVO: Popolazione Auto-Adattiva basata sulla grandezza dell'istanza!
+        # Regola: 25% del numero di nodi. Minimo 15 individui, Massimo 100.
+        if pop_size is None:
+            self.pop_size = max(15, min(100, int(self.instance.num_nodes * 0.25)))
+        else:
+            self.pop_size = pop_size
+            
         self.max_evals = max_evals
         self.evals = 0
         self.population = [] 
-        self.memory = [] # NUOVO: Memoria Immunitaria separata
+        self.memory = [] 
         self.best_cost_tracker = float('inf')
         self.convergence_eval = 0
 
@@ -64,16 +71,19 @@ class ClonalSelection:
         return sum(self.instance.weights[i] * solution[i] for i in range(self.instance.num_nodes))
 
     def generate_greedy_solution(self, randomization_factor=0.2):
-        """ Genera soluzione con K-Tournament (non barando) """
+        """ Genera soluzione con K-Tournament e Redundancy Removal """
         sol = [0] * self.instance.num_nodes
         uncovered_degree = [len(adj) for adj in self.instance.adj_list]
         uncovered_edges_count = len(self.instance.edges)
         
+        # OTTIMIZZAZIONE: Usiamo un set per tracciare i nodi attivi invece di scansionare tutto l'array
+        active_nodes = {i for i in range(self.instance.num_nodes) if uncovered_degree[i] > 0}
+        
         while uncovered_edges_count > 0:
-            candidates = [i for i in range(self.instance.num_nodes) if sol[i] == 0 and uncovered_degree[i] > 0]
-            
-            k_tournament = min(5, len(candidates))
-            tournament_pool = random.sample(candidates, k_tournament)
+            # Trasformiamo in lista solo il set attivo, velocissimo!
+            candidates_list = list(active_nodes)
+            k_tournament = min(5, len(candidates_list))
+            tournament_pool = random.sample(candidates_list, k_tournament)
             
             best_node = -1
             best_score = float('inf')
@@ -86,14 +96,17 @@ class ClonalSelection:
                     best_node = node
                     
             sol[best_node] = 1
+            active_nodes.discard(best_node) # Rimuoviamo il nodo scelto dai candidati
             
             for neighbor in self.instance.adj_list[best_node]:
-                if sol[neighbor] == 0:
+                if sol[neighbor] == 0 and uncovered_degree[neighbor] > 0:
                     uncovered_degree[neighbor] -= 1
                     uncovered_edges_count -= 1
+                    if uncovered_degree[neighbor] == 0:
+                        active_nodes.discard(neighbor) # Se non ha più archi scoperti, lo ignoriamo
             uncovered_degree[best_node] = 0
             
-        # Redundancy removal randomizzato
+        # RIPRISTINO: Redundancy Removal Stocastico (fondamentale per la diversità)
         nodes_in_sol = [i for i in range(self.instance.num_nodes) if sol[i] == 1]
         random.shuffle(nodes_in_sol) 
         
@@ -116,12 +129,13 @@ class ClonalSelection:
             self.population.append({'solution': sol, 'cost': cost, 'affinity': 0})
             self.evals += 1
             
-        # Inizializza la memoria con i migliori iniziali
         self.population.sort(key=lambda x: x['cost'])
         self.memory = self.population[:max(1, int(self.pop_size * 0.2))].copy()
 
     def mutate_and_repair(self, solution, mutation_prob):
         mutated = solution.copy()
+        
+        # RIPRISTINO: Mutazione simmetrica (esplorazione pura)
         for i in range(self.instance.num_nodes):
             if random.random() < mutation_prob:
                 mutated[i] = 1 - mutated[i]
@@ -129,30 +143,40 @@ class ClonalSelection:
         uncovered_degree = [0] * self.instance.num_nodes
         uncovered_edges_count = 0
         
+        # OTTIMIZZAZIONE: Tracciamo solo i nodi che hanno effettivamente archi scoperti
+        active_nodes = set()
         for u, v in self.instance.edges:
             if mutated[u] == 0 and mutated[v] == 0:
                 uncovered_degree[u] += 1
                 uncovered_degree[v] += 1
                 uncovered_edges_count += 1
+                active_nodes.add(u)
+                active_nodes.add(v)
                 
         while uncovered_edges_count > 0:
             best_node, best_score = -1, float('inf')
-            for i in range(self.instance.num_nodes):
-                if mutated[i] == 0 and uncovered_degree[i] > 0:
-                    noise = random.uniform(0, 0.001)
-                    score = (self.instance.weights[i] / uncovered_degree[i]) + noise
-                    if score < best_score:
-                        best_score, best_node = score, i
-                        
+            # Invece di iterare su 800 nodi, iteriamo solo su quelli con archi scoperti (pochi!)
+            for i in active_nodes:
+                noise = random.uniform(0, 0.001)
+                score = (self.instance.weights[i] / uncovered_degree[i]) + noise
+                if score < best_score:
+                    best_score, best_node = score, i
+                    
             mutated[best_node] = 1
+            active_nodes.discard(best_node)
+            
             for neighbor in self.instance.adj_list[best_node]:
                 if mutated[neighbor] == 0 and uncovered_degree[neighbor] > 0:
                     uncovered_degree[neighbor] -= 1
                     uncovered_edges_count -= 1
+                    if uncovered_degree[neighbor] == 0:
+                        active_nodes.discard(neighbor)
             uncovered_degree[best_node] = 0
                     
+        # RIPRISTINO: Redundancy Removal Stocastico nel repair
         nodes_in_sol = [i for i in range(self.instance.num_nodes) if mutated[i] == 1]
         random.shuffle(nodes_in_sol)
+        
         for node in nodes_in_sol:
             can_remove = True
             for neighbor in self.instance.adj_list[node]:
@@ -167,12 +191,11 @@ class ClonalSelection:
     def run(self):
         self.initialize_population()
         generation = 0
-        beta_clones = 0.5 # Fattore moltiplicativo per la clonazione
+        beta_clones = 0.5 
 
         while self.evals < self.max_evals:
             generation += 1
             
-            # 0. Calcolo Affinità Normalizzata (0.0 = peggiore, 1.0 = migliore)
             costs = [ab['cost'] for ab in self.population]
             min_cost, max_cost = min(costs), max(costs)
             
@@ -184,32 +207,27 @@ class ClonalSelection:
 
             new_population = []
 
-            # --- 1 & 2 & 3. VERO CLONALG: Clonazione, Mutazione e Competizione Genitore-Figlio ---
+            # RIPRISTINO: Clonazione per TUTTA la popolazione, non solo la top 50%
             for ab in self.population:
-                # Il numero di cloni dipende dalla VERA affinità
                 num_clones = max(1, int(self.pop_size * beta_clones * ab['affinity']))
-                
-                # Il genitore entra nell'arena contro i suoi cloni
                 best_match = {'solution': ab['solution'].copy(), 'cost': ab['cost'], 'affinity': ab['affinity']}
                 
                 for _ in range(num_clones):
                     if self.evals >= self.max_evals: break
                     
-                    # Iper-mutazione inversamente proporzionale all'affinità
+                    # RIPRISTINO: Tasso di mutazione originale, forte e proporzionale
                     mutation_prob = 0.05 + 0.45 * (1.0 - ab['affinity'])
+                    
                     mutated_sol = self.mutate_and_repair(ab['solution'], mutation_prob)
                     cost = self.calculate_cost(mutated_sol)
                     self.evals += 1
                     
-                    # Se il clone batte il genitore, diventa il nuovo campione
                     if cost < best_match['cost']:
-                        best_match = {'solution': mutated_sol, 'cost': cost, 'affinity': 0} # Affinità da ricalcolare
+                        best_match = {'solution': mutated_sol, 'cost': cost, 'affinity': 0}
                 
                 new_population.append(best_match)
                 if self.evals >= self.max_evals: break
 
-            # --- 4. MEMORY UPDATE (Aggiornamento Cellule di Memoria) ---
-            # La memoria accoglie i migliori anticorpi unici della nuova generazione
             memory_size = max(1, int(self.pop_size * 0.2))
             combined_memory = self.memory + new_population
             combined_memory.sort(key=lambda x: x['cost'])
@@ -217,7 +235,7 @@ class ClonalSelection:
             unique_memory = []
             seen_signatures = set()
             for ind in combined_memory:
-                sig = tuple(ind['solution']) # Controllo duplicati con TUPLE (Hamming/Struttura)
+                sig = tuple(ind['solution']) 
                 if sig not in seen_signatures:
                     seen_signatures.add(sig)
                     unique_memory.append(ind)
@@ -225,7 +243,6 @@ class ClonalSelection:
                     break
             self.memory = unique_memory
 
-            # Rimuoviamo duplicati strutturali anche dalla popolazione corrente
             unique_pop = []
             seen_pop_sig = set()
             for ind in new_population:
@@ -239,7 +256,6 @@ class ClonalSelection:
                  unique_pop.append({'solution': sol, 'cost': self.calculate_cost(sol), 'affinity': 0})
                  self.evals += 1
 
-            # --- 5. RECEPTOR EDITING (sulla Popolazione, NON sulla Memoria) ---
             unique_pop.sort(key=lambda x: x['cost'])
             if self.evals < self.max_evals:
                 num_to_replace = max(1, int(self.pop_size * 0.1))
@@ -250,7 +266,6 @@ class ClonalSelection:
 
             self.population = unique_pop
             
-            # --- AGGIORNAMENTO CONVERGENZA ---
             if self.memory[0]['cost'] < self.best_cost_tracker:
                 self.best_cost_tracker = self.memory[0]['cost']
                 self.convergence_eval = self.evals
@@ -258,7 +273,6 @@ class ClonalSelection:
             if generation % 10 == 0:
                 print(f"Gen {generation} | FE: {self.evals}/{self.max_evals} | Pop_Best: {self.population[0]['cost']} | MEMORY_BEST: {self.memory[0]['cost']}")
 
-        # Alla fine, la soluzione assoluta viene estratta dalla Memoria Immunitaria
         print(f"\n[!] Ricerca completata! Miglior costo finale (Memory Cell): {self.memory[0]['cost']}")
         return self.memory[0]
 
@@ -269,19 +283,9 @@ if __name__ == "__main__":
     import time
     from collections import defaultdict
     
-    # 1. Configurazione del percorso e dei Target di Benchmark
-    cartella_istanze = "wvcp-instances/wvcp-instances" 
+    cartella_istanze = "wvcp-instances" 
     
-    # Valori di riferimento (paper 2012)
-    # 💡 TRUCCO: Commenta o elimina una riga qui sotto per NON eseguire quella famiglia!
     BENCHMARK_TARGETS = {
-        "vc_20_60": {"avg": 861.8, "eval": 7.7},
-        "vc_20_120": {"avg": 1038.2, "eval": 5.2},
-        "vc_25_150": {"avg": 1264.0, "eval": 21.0},
-
-    }
-
-    ALL_BENCHMARK_TARGETS = {
         "vc_20_60": {"avg": 861.8, "eval": 7.7},
         "vc_20_120": {"avg": 1038.2, "eval": 5.2},
         "vc_25_150": {"avg": 1264.0, "eval": 21.0},
@@ -300,16 +304,13 @@ if __name__ == "__main__":
         print(f"\n[-] ERRORE CRITICO: La cartella '{cartella_istanze}' non esiste!")
         sys.exit(1)
         
-    # Leggiamo tutti i file txt nella cartella
     file_nella_cartella = [f for f in os.listdir(cartella_istanze) if f.endswith('.txt')]
     tutti_i_file = []
     
-    # Filtriamo dinamicamente in base a cosa c'è in BENCHMARK_TARGETS
     for nome_file in file_nella_cartella:
         parti_nome = nome_file.replace('.txt', '').split('_')
         if len(parti_nome) >= 3:
             famiglia = f"{parti_nome[0]}_{parti_nome[1]}_{parti_nome[2]}"
-            # Aggiunge alla lista esecutiva SOLO se la famiglia è nel dizionario
             if famiglia in BENCHMARK_TARGETS:
                 tutti_i_file.append(nome_file)
                 
@@ -321,7 +322,6 @@ if __name__ == "__main__":
         
     print(f"[*] Trovate {len(tutti_i_file)} istanze valide. Inizio elaborazione...\n")
     
-    # Dizionario per accumulare costi e valutazioni
     risultati_raggruppati = defaultdict(lambda: {'costi': [], 'evals': []})
 
     for nome_file in tutti_i_file:
@@ -340,7 +340,8 @@ if __name__ == "__main__":
             
         start_time = time.time()
         
-        algoritmo = ClonalSelection(istanza, pop_size=20, max_evals=20000)
+        # NUOVO: Rimosso pop_size=50. Ora l'algoritmo calcola la dimensione ideale da solo!
+        algoritmo = ClonalSelection(istanza, max_evals=20000)
         miglior_soluzione = algoritmo.run()
         
         elapsed_time = time.time() - start_time
@@ -369,7 +370,6 @@ if __name__ == "__main__":
         print(f"\n--- FAMIGLIA: {famiglia} (Testate {len(costi)} istanze) ---")
         
         if target:
-            # --- CONFRONTO COSTO MEDIO ---
             diff_media = media_costo - target['avg']
             segno_media = "+" if diff_media > 0 else ""
             val_media = "OTTIMO/MIGLIORE" if diff_media <= 0 else "Da ottimizzare"
@@ -377,7 +377,6 @@ if __name__ == "__main__":
             print(f"  [COSTO] Media CLONALG: \t{media_costo:.2f}")
             print(f"  [COSTO] Media Target:  \t{target['avg']:.2f} \t[{segno_media}{diff_media:.2f} -> {val_media}]")
             
-            # --- CONFRONTO EVALUATIONS (FE) ---
             diff_eval = media_eval - target['eval']
             segno_eval = "+" if diff_eval > 0 else ""
             val_eval = "PIÙ VELOCE" if diff_eval <= 0 else "Più lento"
@@ -385,7 +384,6 @@ if __name__ == "__main__":
             print(f"  [EVALS] Media CLONALG: \t{media_eval:.1f} FE")
             print(f"  [EVALS] Media Target:  \t{target['eval']:.1f} FE \t[{segno_eval}{diff_eval:.1f} -> {val_eval}]")
             
-            # --- CONFRONTO BEST COST (Se presente nel target) ---
             if 'best' in target:
                 diff_best = best_costo - target['best']
                 segno_best = "+" if diff_best > 0 else ""
