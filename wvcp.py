@@ -9,9 +9,9 @@ class MWVCInstance:
         self.weights = []
         self.adj_matrix = []
         self.edges = []
-        self.adj_list = [] # NUOVO: Lista di adiacenza per calcoli super-veloci
+        self.adj_list = [] # Lista di adiacenza per calcoli super-veloci
+
         
-        # Supportiamo la lettura diretta dal file!
         if filepath:
             with open(filepath, 'r') as f:
                 self._parse_data(f.read())
@@ -21,69 +21,58 @@ class MWVCInstance:
             raise ValueError("Devi fornire un filepath o raw_data.")
 
     def _parse_data(self, raw_data):
-        # Rimuoviamo righe vuote e dividiamo per riga
         lines = [line.strip() for line in raw_data.strip().split('\n') if line.strip()]
-        
-        # 1. Numero di vertici (prima riga)
         self.num_nodes = int(lines[0])
-        
-        # 2. Pesi dei vertici (seconda riga)
         self.weights = [float(w) for w in lines[1].split()]
         
-        # 3. Matrice di adiacenza (dalla terza riga in poi)
         for i in range(2, 2 + self.num_nodes):
             row = [int(val) for val in lines[i].split()]
             self.adj_matrix.append(row)
             
-        # 4. Estrazione della lista degli archi e lista di adiacenza
-        self.adj_list = [[] for _ in range(self.num_nodes)] # Inizializza liste vuote per ogni nodo
+        self.adj_list = [[] for _ in range(self.num_nodes)]
         for i in range(self.num_nodes):
-            for j in range(i + 1, self.num_nodes): # i+1 per evitare duplicati
+            for j in range(i + 1, self.num_nodes):
                 if self.adj_matrix[i][j] == 1:
                     self.edges.append((i, j))
-                    self.adj_list[i].append(j) # Aggiunge j come vicino di i
-                    self.adj_list[j].append(i) # Aggiunge i come vicino di j
+                    self.adj_list[i].append(j)
+                    self.adj_list[j].append(i)
                     
         print(f"[+] Istanza caricata con successo: {self.num_nodes} nodi, {len(self.edges)} archi.")
 
-class ClonalSelection:
 
+class ClonalSelection:
+    """
+    Algoritmo basato sul Principio di Selezione Clonale (Artificial Immune System)
+    Vera implementazione CLONALG con Memoria separata e Affinità normalizzata.
+    """
     def __init__(self, instance, pop_size=50, max_evals=20000):
         self.instance = instance
         self.pop_size = pop_size
         self.max_evals = max_evals
         self.evals = 0
         self.population = [] 
+        self.memory = [] # NUOVO: Memoria Immunitaria separata
+        self.best_cost_tracker = float('inf')
+        self.convergence_eval = 0
 
     def is_valid(self, solution):
-        """ Verifica rapida se la soluzione copre tutti gli archi """
         for u, v in self.instance.edges:
             if solution[u] == 0 and solution[v] == 0:
                 return False
         return True
 
     def calculate_cost(self, solution):
-        """ Calcola il peso totale dei vertici selezionati """
         return sum(self.instance.weights[i] * solution[i] for i in range(self.instance.num_nodes))
 
     def generate_greedy_solution(self, randomization_factor=0.2):
-        """ 
-        Genera una soluzione usando un approccio Greedy randomizzato (Torneo).
-        """
+        """ Genera soluzione con K-Tournament (non barando) """
         sol = [0] * self.instance.num_nodes
-        
         uncovered_degree = [len(adj) for adj in self.instance.adj_list]
         uncovered_edges_count = len(self.instance.edges)
-        #print("x" ,uncovered_degree, sum(uncovered_degree))
         
         while uncovered_edges_count > 0:
-            candidates = []
-            for i in range(self.instance.num_nodes):
-                if sol[i] == 0 and uncovered_degree[i] > 0:         #se l'arco non è stato scelto e ha almeno un arco
-                    candidates.append(i)
+            candidates = [i for i in range(self.instance.num_nodes) if sol[i] == 0 and uncovered_degree[i] > 0]
             
-            
-            # Torneo: scegliamo 5 nodi a caso tra quelli validi
             k_tournament = min(5, len(candidates))
             tournament_pool = random.sample(candidates, k_tournament)
             
@@ -91,31 +80,23 @@ class ClonalSelection:
             best_score = float('inf')
             
             for node in tournament_pool:
-                # Punteggio = Peso / GradiScoperti + piccolo rumore per rompere i parimeriti
                 noise = random.uniform(0, 0.001)
                 score = (self.instance.weights[node] / uncovered_degree[node]) + noise
                 if score < best_score:
                     best_score = score
                     best_node = node
                     
-            chosen_node = best_node
+            sol[best_node] = 1
             
-            #il nodo migliore del torneo viene impostato a 1
-            sol[chosen_node] = 1
- 
-            
-            # Aggiornamento fulmineo dei gradi
-            for neighbor in self.instance.adj_list[chosen_node]:
+            for neighbor in self.instance.adj_list[best_node]:
                 if sol[neighbor] == 0:
                     uncovered_degree[neighbor] -= 1
                     uncovered_edges_count -= 1
-            uncovered_degree[chosen_node] = 0
-        
-        #rimuove ridondanze
-        """  
-        # Redundancy removal (Rendiamola casuale invece che orientata al peso)
+            uncovered_degree[best_node] = 0
+            
+        # Redundancy removal randomizzato
         nodes_in_sol = [i for i in range(self.instance.num_nodes) if sol[i] == 1]
-        random.shuffle(nodes_in_sol) # Rimuoviamo in ordine casuale, non barando col peso
+        random.shuffle(nodes_in_sol) 
         
         for node in nodes_in_sol:
             can_remove = True
@@ -123,39 +104,32 @@ class ClonalSelection:
                 if sol[neighbor] == 0:
                     can_remove = False
                     break
-            
             if can_remove:
                 sol[node] = 0 
-        """
+                
         return sol
 
     def initialize_population(self):
-        """ Inizializza la generazione zero """
-        print("[*] Inizializzazione della popolazione intelligente in corso...")
+        print("[*] Generazione anticorpi e Cellule di Memoria...")
         for _ in range(self.pop_size):
             sol = self.generate_greedy_solution()
-            if(not self.is_valid(sol)): print("SOL NON VALIDA","!"*50)
             cost = self.calculate_cost(sol)
-            self.population.append({'solution': sol, 'cost': cost})
+            self.population.append({'solution': sol, 'cost': cost, 'affinity': 0})
             self.evals += 1
-        
+            
+        # Inizializza la memoria con i migliori iniziali
         self.population.sort(key=lambda x: x['cost'])
-        print(f"[+] Popolazione creata! Il miglior costo di partenza è: {self.population[0]['cost']}")
+        self.memory = self.population[:max(1, int(self.pop_size * 0.2))].copy()
 
     def mutate_and_repair(self, solution, mutation_prob):
-        """ Iper-mutazione con riparazione """
         mutated = solution.copy()
-
-        # 1. Flip dei bit (Mutazione vera e propria)
         for i in range(self.instance.num_nodes):
             if random.random() < mutation_prob:
                 mutated[i] = 1 - mutated[i]
                 
-        # 2. Riparazione ultra-veloce
         uncovered_degree = [0] * self.instance.num_nodes
         uncovered_edges_count = 0
         
-        # Identifichiamo subito gli archi rimasti scoperti
         for u, v in self.instance.edges:
             if mutated[u] == 0 and mutated[v] == 0:
                 uncovered_degree[u] += 1
@@ -163,34 +137,26 @@ class ClonalSelection:
                 uncovered_edges_count += 1
                 
         while uncovered_edges_count > 0:
-            best_node = -1
-            best_score = float('inf')
-            
-            # Anche qui aggiungiamo un filo di rumore per l'esplorazione
+            best_node, best_score = -1, float('inf')
             for i in range(self.instance.num_nodes):
                 if mutated[i] == 0 and uncovered_degree[i] > 0:
                     noise = random.uniform(0, 0.001)
                     score = (self.instance.weights[i] / uncovered_degree[i]) + noise
                     if score < best_score:
-                        best_score = score
-                        best_node = i
+                        best_score, best_node = score, i
                         
             mutated[best_node] = 1
-            
-            # Aggiorniamo a cascata
             for neighbor in self.instance.adj_list[best_node]:
                 if mutated[neighbor] == 0 and uncovered_degree[neighbor] > 0:
                     uncovered_degree[neighbor] -= 1
                     uncovered_edges_count -= 1
             uncovered_degree[best_node] = 0
                     
-        # 3. Rimozione ridondanze rapida
         nodes_in_sol = [i for i in range(self.instance.num_nodes) if mutated[i] == 1]
-        random.shuffle(nodes_in_sol) # Mischiamo per non creare bias deterministico
-        
+        random.shuffle(nodes_in_sol)
         for node in nodes_in_sol:
             can_remove = True
-            for neighbor in self.instance.adj_list[node]:#se i  suoi vicini son accessi senza di lui possiamo toglierlo dalla
+            for neighbor in self.instance.adj_list[node]:
                 if mutated[neighbor] == 0:
                     can_remove = False
                     break
@@ -201,130 +167,225 @@ class ClonalSelection:
 
     def run(self):
         self.initialize_population()
-        
         generation = 0
+        beta_clones = 0.5 # Fattore moltiplicativo per la clonazione
 
         while self.evals < self.max_evals:
             generation += 1
-            clones_pool = []
+            
+            # 0. Calcolo Affinità Normalizzata (0.0 = peggiore, 1.0 = migliore)
+            costs = [ab['cost'] for ab in self.population]
+            min_cost, max_cost = min(costs), max(costs)
+            
+            for ab in self.population:
+                if max_cost == min_cost:
+                    ab['affinity'] = 1.0
+                else:
+                    ab['affinity'] = (max_cost - ab['cost']) / (max_cost - min_cost)
 
-            # --- 1. CLONAZIONE ---
-            for rank, antibody in enumerate(self.population):
-                num_clones = max(1, int((self.pop_size * 0.5) / (rank + 1)))# dal 16 in poi hanno sol 1 clone
+            new_population = []
+
+            # --- 1 & 2 & 3. VERO CLONALG: Clonazione, Mutazione e Competizione Genitore-Figlio ---
+            for ab in self.population:
+                # Il numero di cloni dipende dalla VERA affinità
+                num_clones = max(1, int(self.pop_size * beta_clones * ab['affinity']))
+                
+                # Il genitore entra nell'arena contro i suoi cloni
+                best_match = {'solution': ab['solution'].copy(), 'cost': ab['cost'], 'affinity': ab['affinity']}
+                
                 for _ in range(num_clones):
-                    clones_pool.append({'solution': antibody['solution'].copy(), 'rank': rank})
+                    if self.evals >= self.max_evals: break
+                    
+                    # Iper-mutazione inversamente proporzionale all'affinità
+                    mutation_prob = 0.05 + 0.45 * (1.0 - ab['affinity'])
+                    mutated_sol = self.mutate_and_repair(ab['solution'], mutation_prob)
+                    cost = self.calculate_cost(mutated_sol)
+                    self.evals += 1
+                    
+                    # Se il clone batte il genitore, diventa il nuovo campione
+                    if cost < best_match['cost']:
+                        best_match = {'solution': mutated_sol, 'cost': cost, 'affinity': 0} # Affinità da ricalcolare
+                
+                new_population.append(best_match)
+                if self.evals >= self.max_evals: break
 
-            # --- 2. IPER-MUTAZIONE ---
-            mutated_clones = []
-            for clone in clones_pool:
-                rank = clone['rank']
-                mutation_prob = 0.05 + 0.45 * (rank / self.pop_size)
-                
-                mutated_sol = self.mutate_and_repair(clone['solution'], mutation_prob)
-                cost = self.calculate_cost(mutated_sol)
-                self.evals += 1
-                
-                mutated_clones.append({'solution': mutated_sol, 'cost': cost})
-                
-                if self.evals >= self.max_evals:
+            # --- 4. MEMORY UPDATE (Aggiornamento Cellule di Memoria) ---
+            # La memoria accoglie i migliori anticorpi unici della nuova generazione
+            memory_size = max(1, int(self.pop_size * 0.2))
+            combined_memory = self.memory + new_population
+            combined_memory.sort(key=lambda x: x['cost'])
+            
+            unique_memory = []
+            seen_signatures = set()
+            for ind in combined_memory:
+                sig = tuple(ind['solution']) # Controllo duplicati con TUPLE (Hamming/Struttura)
+                if sig not in seen_signatures:
+                    seen_signatures.add(sig)
+                    unique_memory.append(ind)
+                if len(unique_memory) == memory_size:
                     break
+            self.memory = unique_memory
 
-            # --- 3. SELEZIONE ---
-            combined = self.population + mutated_clones
-            combined.sort(key=lambda x: x['cost'])
-            
-            unique_population = []
-            seen_costs = set()
-            for ind in combined:
-                if ind['cost'] not in seen_costs:
-                    seen_costs.add(ind['cost'])
-                    unique_population.append(ind)
-                if len(unique_population) == self.pop_size:
-                    break
-            
-            #un elemento per ogni costo
-            while len(unique_population) < self.pop_size and self.evals < self.max_evals:
-                sol = self.generate_greedy_solution()
-                unique_population.append({'solution': sol, 'cost': self.calculate_cost(sol)})
-                self.evals += 1
-            
-            self.population = unique_population
+            # Rimuoviamo duplicati strutturali anche dalla popolazione corrente
+            unique_pop = []
+            seen_pop_sig = set()
+            for ind in new_population:
+                sig = tuple(ind['solution'])
+                if sig not in seen_pop_sig:
+                    seen_pop_sig.add(sig)
+                    unique_pop.append(ind)
+                    
+            while len(unique_pop) < self.pop_size and self.evals < self.max_evals:
+                 sol = self.generate_greedy_solution()
+                 unique_pop.append({'solution': sol, 'cost': self.calculate_cost(sol), 'affinity': 0})
+                 self.evals += 1
 
-            # --- 4. RECEPTOR EDITING ---
-            #sostituisco i peggiori  10% della popolazione e li sostituisco con soluzioni nuove
+            # --- 5. RECEPTOR EDITING (sulla Popolazione, NON sulla Memoria) ---
+            unique_pop.sort(key=lambda x: x['cost'])
             if self.evals < self.max_evals:
                 num_to_replace = max(1, int(self.pop_size * 0.1))
-                for i in range(self.pop_size - num_to_replace, self.pop_size):
+                for i in range(len(unique_pop) - num_to_replace, len(unique_pop)):
                     sol = self.generate_greedy_solution()
-                    self.population[i] = {'solution': sol, 'cost': self.calculate_cost(sol)}
+                    unique_pop[i] = {'solution': sol, 'cost': self.calculate_cost(sol), 'affinity': 0}
                     self.evals += 1
 
-            if generation % 10 == 0:
-                print(f"Generazione {generation} | Valutazioni: {self.evals}/{self.max_evals} | Miglior Costo: {self.population[0]['cost']}")
-                
-        print(f"\n[!] Ricerca completata! Miglior costo finale: {self.population[0]['cost']}")
-        
-        return self.population[0]
+            self.population = unique_pop
+            
+            if generation % 5 == 0:
+                print(f"Gen {generation} | FE: {self.evals}/{self.max_evals} | Pop_Best: {self.population[0]['cost']} | MEMORY_BEST: {self.memory[0]['cost']}")
 
+            # --- AGGIORNAMENTO CONVERGENZA ---
+            if self.memory[0]['cost'] < self.best_cost_tracker:
+                self.best_cost_tracker = self.memory[0]['cost']
+                self.convergence_eval = self.evals
+        # Alla fine, la soluzione assoluta viene estratta dalla Memoria Immunitaria
+        print(f"\n[!] Ricerca completata! Miglior costo finale (Memory Cell): {self.memory[0]['cost']}")
+        return self.memory[0]
 
-# --- MAIN BLOCK: TEST BENCH AUTOMATIZZATO ---
+# --- MAIN BLOCK: TEST BENCH MASSIVO E VALUTAZIONE AUTOMATICA ---
 if __name__ == "__main__":
     import sys
     import os
+    import time
+    from collections import defaultdict
     
-    # 1. Configurazione del percorso 
+    # 1. Configurazione del percorso e dei Target di Benchmark
     cartella_istanze = "wvcp-instances/wvcp-instances" 
-    base_nome_file = "vc_25_150_{:02d}.txt" 
     
-    costo_totale = 0
-    istanze_calcolate = 0
-    risultati_dettagliati = []
+    # Valori di riferimento (paper 2012)
+    BENCHMARK_TARGETS = {
+        "vc_20_60": {"avg": 861.8, "eval": 7.7},
+        "vc_20_120": {"avg": 1038.2, "eval": 5.2},
+        "vc_25_150": {"avg": 1264.0, "eval": 21.0},
+        "vc_100_500": {"avg": 4600.6, "eval": 703.0},
+        "vc_100_2000": {"avg": 6051.9, "eval": 307.0},
+        "vc_200_750": {"avg": 8274.5, "eval": 995.6},
+        "vc_200_3000": {"avg": 11600.2, "eval": 690.6},
+        "vc_800_10000": {"avg": 44397.8, "best": 44396.0, "eval": 4521.9}
+    }
     
-    print("\n" + "="*50)
-    print(" AVVIO BENCHMARK")
-    print("="*50)
+    print("\n" + "="*80)
+    print(" AVVIO BENCHMARK GLOBALE SU TUTTA LA CARTELLA (COSTI & EVALS)")
+    print("="*80)
     
-    # 2. Ciclo for per scansionare le 10 istanze
-    for i in range(1, 11):
-        nome_file = base_nome_file.format(i)
+    if not os.path.exists(cartella_istanze):
+        print(f"\n[-] ERRORE CRITICO: La cartella '{cartella_istanze}' non esiste!")
+        sys.exit(1)
+        
+    tutti_i_file = [f for f in os.listdir(cartella_istanze) if f.endswith('.txt')]
+    tutti_i_file.sort()
+    
+    if not tutti_i_file:
+        print(f"\n[-] ERRORE CRITICO: Nessun file .txt trovato in '{cartella_istanze}'!")
+        sys.exit(1)
+        
+    print(f"[*] Trovate {len(tutti_i_file)} istanze. Inizio elaborazione...\n")
+    
+    # Dizionario per accumulare costi e valutazioni per ogni famiglia
+    # Struttura: {'vc_20_60': {'costi': [], 'evals': []}, ...}
+    risultati_raggruppati = defaultdict(lambda: {'costi': [], 'evals': []})
+
+    # 2. Esecuzione su tutta la cartella
+    for nome_file in tutti_i_file:
         percorso_completo = os.path.join(cartella_istanze, nome_file)
         
-        print(f"\n[*] Analisi in corso sull'istanza: {nome_file} ...")
+        # Estrai la famiglia dal nome del file
+        parti_nome = nome_file.replace('.txt', '').split('_')
+        if len(parti_nome) >= 3:
+            famiglia = f"{parti_nome[0]}_{parti_nome[1]}_{parti_nome[2]}"
+        else:
+            famiglia = "Altro"
+            
+        print(f"[*] Elaborazione: {nome_file:<20} ...", end=" ", flush=True)
         
         try:
             istanza = MWVCInstance(filepath=percorso_completo)
-        except FileNotFoundError:
-            print(f"[-] ATTENZIONE: File '{percorso_completo}' non trovato. Salto all'istanza successiva.")
+        except Exception as e:
+            print(f"[-] Errore: {e}")
             continue
             
-        # 3. Avvio dell'Algoritmo (max_evals = 20000 come da paper)
-        algoritmo = ClonalSelection(istanza, pop_size=50, max_evals=20000)
+        start_time = time.time()
         
+        algoritmo = ClonalSelection(istanza, pop_size=50, max_evals=20000)
         miglior_soluzione = algoritmo.run()
         
-        costo_istanza = miglior_soluzione['cost']
-        risultati_dettagliati.append((nome_file, costo_istanza))
-        costo_totale += costo_istanza
-        istanze_calcolate += 1
-
-  
-    # 4. Report Finale
-    print("\n" + "#"*50)
-    print(" REPORT FINALE BENCHMARK")
-    print("#"*50)
-    
-    if istanze_calcolate > 0:
-        for nome, costo in risultati_dettagliati:
-            print(f" -> {nome}: \tCosto Ottenuto = {costo}")
-            
-        media_algoritmo = costo_totale / istanze_calcolate
-        print("-" * 50)
-        print(f" MEDIA CALCOLATA SU {istanze_calcolate} ISTANZE: {media_algoritmo:.2f}")
-        print(f" BENCHMARK DA BATTERE (Tabella 1 - ACO per 20 nodi/60 archi): 861.80")
-        print("#"*50)
+        elapsed_time = time.time() - start_time
         
+        costo_istanza = miglior_soluzione['cost']
+        eval_convergenza = algoritmo.convergence_eval
+        
+        risultati_raggruppati[famiglia]['costi'].append(costo_istanza)
+        risultati_raggruppati[famiglia]['evals'].append(eval_convergenza)
+        
+        print(f"Fatto! Costo: {costo_istanza:.1f} | FE: {eval_convergenza} | Tempo: {elapsed_time:.2f}s")
 
-    else:
-        print("\n[-] ERRORE CRITICO: Nessuna istanza è stata caricata. Controlla la variabile 'cartella_istanze'!")
-        sys.exit(1) 
-   
+    # 3. Valutazione e Confronto con i Benchmark
+    print("\n\n" + "#"*80)
+    print(" REPORT DI VALUTAZIONE FINALE (Confronto con PBIG/ACO)")
+    print("#"*80)
+    
+    for famiglia, dati in risultati_raggruppati.items():
+        costi = dati['costi']
+        evals = dati['evals']
+        
+        media_costo = sum(costi) / len(costi)
+        best_costo = min(costi)
+        media_eval = sum(evals) / len(evals)
+        
+        target = BENCHMARK_TARGETS.get(famiglia)
+        
+        print(f"\n--- FAMIGLIA: {famiglia} (Testate {len(costi)} istanze) ---")
+        
+        if target:
+            # --- CONFRONTO COSTO MEDIO ---
+            diff_media = media_costo - target['avg']
+            segno_media = "+" if diff_media > 0 else ""
+            val_media = "OTTIMO/MIGLIORE" if diff_media <= 0 else "Da ottimizzare"
+            
+            print(f"  [COSTO] Media CLONALG: \t{media_costo:.2f}")
+            print(f"  [COSTO] Media Target:  \t{target['avg']:.2f} \t[{segno_media}{diff_media:.2f} -> {val_media}]")
+            
+            # --- CONFRONTO EVALUATIONS (FE) ---
+            diff_eval = media_eval - target['eval']
+            segno_eval = "+" if diff_eval > 0 else ""
+            val_eval = "PIÙ VELOCE" if diff_eval <= 0 else "Più lento"
+            
+            print(f"  [EVALS] Media CLONALG: \t{media_eval:.1f} FE")
+            print(f"  [EVALS] Media Target:  \t{target['eval']:.1f} FE \t[{segno_eval}{diff_eval:.1f} -> {val_eval}]")
+            
+            # --- CONFRONTO BEST COST (Se presente nel target) ---
+            if 'best' in target:
+                diff_best = best_costo - target['best']
+                segno_best = "+" if diff_best > 0 else ""
+                val_best = "OTTIMO/MIGLIORE" if diff_best <= 0 else "Da ottimizzare"
+                
+                print(f"  [BEST ] Best CLONALG:  \t{best_costo:.2f}")
+                print(f"  [BEST ] Best Target:   \t{target['best']:.2f} \t[{segno_best}{diff_best:.2f} -> {val_best}]")
+        else:
+            print(f"  [COSTO] Media Calcolata:\t{media_costo:.2f}")
+            print(f"  [EVALS] Media Evals:    \t{media_eval:.1f} FE")
+            print(f"  (Nessun target inserito per questa famiglia)")
+
+    print("\n" + "="*80)
+    print(" TEST MASSIVO COMPLETATO!")
+
