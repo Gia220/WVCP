@@ -1,8 +1,11 @@
 import random
+import sys
+import os
+import time
 
 class MWVCInstance:
     """
-    Classe che rappresenta un'istanza del problema Minimum Weight Vertex Cover.
+    Classe che rappresenta un'istanza del problema WVCP.
     """
     def __init__(self, filepath=None, raw_data=None):
         self.num_nodes = 0
@@ -17,7 +20,7 @@ class MWVCInstance:
         elif raw_data:
             self._parse_data(raw_data)
         else:
-            raise ValueError("Devi fornire un filepath o raw_data.")
+            raise ValueError("fornire un filepath o raw_data.")
 
     def _parse_data(self, raw_data):
         lines = [line.strip() for line in raw_data.strip().split('\n') if line.strip()]
@@ -36,21 +39,20 @@ class MWVCInstance:
                     self.adj_list[i].append(j)
                     self.adj_list[j].append(i)
                     
-        print(f"[+] Istanza caricata con successo: {self.num_nodes} nodi, {len(self.edges)} archi.")
+        print(f"Istanza caricata con successo: {self.num_nodes} nodi, {len(self.edges)} archi.")
 
 
-class ClonalSelection:
+class Immune_Inspired:
     """
     Algoritmo basato sul Principio di Selezione Clonale (Artificial Immune System)
-    Versione "Champion": massimizza la qualità della ricerca (best cost) mantenendo un'alta diversità.
     """
+
     def __init__(self, instance, pop_size=None, max_evals=20000):
         self.instance = instance
         
-        # NUOVO: Popolazione Auto-Adattiva basata sulla grandezza dell'istanza!
-        # Regola: 25% del numero di nodi. Minimo 15 individui, Massimo 100.
+        # Popolazione Auto-Adattiva basata sulla grandezza dell'istanza! (25% del numero di nodi. Minimo 15 individui, Massimo 100.)
         if pop_size is None:
-            self.pop_size = max(15, min(100, int(self.instance.num_nodes * 0.25)))
+            self.pop_size = max(10, min(100, int(self.instance.num_nodes * 0.20)))
         else:
             self.pop_size = pop_size
             
@@ -72,18 +74,18 @@ class ClonalSelection:
 
     def generate_greedy_solution(self, randomization_factor=0.2):
         """ Genera soluzione con K-Tournament e Redundancy Removal """
-        sol = [0] * self.instance.num_nodes
-        uncovered_degree = [len(adj) for adj in self.instance.adj_list]
-        uncovered_edges_count = len(self.instance.edges)
+
+        sol = [0] * self.instance.num_nodes                                     #inizializzazione
+        uncovered_degree = [len(adj) for adj in self.instance.adj_list]         #per ogni nod dice quanti archi non sono stati assegnati
+        uncovered_edges_count = len(self.instance.edges)                        #numero totale di archi da dover ancora assengare
         
-        # OTTIMIZZAZIONE: Usiamo un set per tracciare i nodi attivi invece di scansionare tutto l'array
-        active_nodes = {i for i in range(self.instance.num_nodes) if uncovered_degree[i] > 0}
+        active_nodes = {i for i in range(self.instance.num_nodes) if uncovered_degree[i] > 0}           #nodi da attivare
         
         while uncovered_edges_count > 0:
-            # Trasformiamo in lista solo il set attivo, velocissimo!
+            
             candidates_list = list(active_nodes)
             k_tournament = min(5, len(candidates_list))
-            tournament_pool = random.sample(candidates_list, k_tournament)
+            tournament_pool = random.sample(candidates_list, k_tournament)      #preleva k elementi
             
             best_node = -1
             best_score = float('inf')
@@ -95,21 +97,24 @@ class ClonalSelection:
                     best_score = score
                     best_node = node
                     
-            sol[best_node] = 1
-            active_nodes.discard(best_node) # Rimuoviamo il nodo scelto dai candidati
+            sol[best_node] = 1                                                  #migliore del torneo è impostato a 1
+            active_nodes.discard(best_node)                                     # Rimuoviamo il nodo scelto dai candidati
             
+            #assegnazione ai vicini 
             for neighbor in self.instance.adj_list[best_node]:
                 if sol[neighbor] == 0 and uncovered_degree[neighbor] > 0:
                     uncovered_degree[neighbor] -= 1
                     uncovered_edges_count -= 1
+
                     if uncovered_degree[neighbor] == 0:
                         active_nodes.discard(neighbor) # Se non ha più archi scoperti, lo ignoriamo
             uncovered_degree[best_node] = 0
             
-        # RIPRISTINO: Redundancy Removal Stocastico (fondamentale per la diversità)
+        #Redundancy Removal Stocastico 
         nodes_in_sol = [i for i in range(self.instance.num_nodes) if sol[i] == 1]
         random.shuffle(nodes_in_sol) 
         
+        #rimuovo un nodo se tutti i vicini sono attivi
         for node in nodes_in_sol:
             can_remove = True
             for neighbor in self.instance.adj_list[node]:
@@ -122,20 +127,20 @@ class ClonalSelection:
         return sol
 
     def initialize_population(self):
-        print("[*] Generazione anticorpi e Cellule di Memoria...")
+        print("Generazione pop")
         for _ in range(self.pop_size):
             sol = self.generate_greedy_solution()
             cost = self.calculate_cost(sol)
             self.population.append({'solution': sol, 'cost': cost, 'affinity': 0})
             self.evals += 1
             
-        self.population.sort(key=lambda x: x['cost'])
-        self.memory = self.population[:max(1, int(self.pop_size * 0.2))].copy()
+        self.population.sort(key=lambda x: x['cost'])                                       #popolazione ordinata in base al costo
+        self.memory = self.population[:max(1, int(self.pop_size * 0.2))].copy()             #copia la top 20 %  delle soluzionio 
 
     def mutate_and_repair(self, solution, mutation_prob):
-        mutated = solution.copy()
+        mutated = solution.copy()                               #clonazione
         
-        # RIPRISTINO: Mutazione simmetrica (esplorazione pura)
+        # mutazione
         for i in range(self.instance.num_nodes):
             if random.random() < mutation_prob:
                 mutated[i] = 1 - mutated[i]
@@ -143,9 +148,9 @@ class ClonalSelection:
         uncovered_degree = [0] * self.instance.num_nodes
         uncovered_edges_count = 0
         
-        # OTTIMIZZAZIONE: Tracciamo solo i nodi che hanno effettivamente archi scoperti
+        # Tracciamo solo i nodi che hanno effettivamente archi scoperti
         active_nodes = set()
-        for u, v in self.instance.edges:
+        for u, v in self.instance.edges:       
             if mutated[u] == 0 and mutated[v] == 0:
                 uncovered_degree[u] += 1
                 uncovered_degree[v] += 1
@@ -155,7 +160,8 @@ class ClonalSelection:
                 
         while uncovered_edges_count > 0:
             best_node, best_score = -1, float('inf')
-            # Invece di iterare su 800 nodi, iteriamo solo su quelli con archi scoperti (pochi!)
+            
+            
             for i in active_nodes:
                 noise = random.uniform(0, 0.001)
                 score = (self.instance.weights[i] / uncovered_degree[i]) + noise
@@ -173,7 +179,7 @@ class ClonalSelection:
                         active_nodes.discard(neighbor)
             uncovered_degree[best_node] = 0
                     
-        # RIPRISTINO: Redundancy Removal Stocastico nel repair
+        #Redundancy Removal Stocastico 
         nodes_in_sol = [i for i in range(self.instance.num_nodes) if mutated[i] == 1]
         random.shuffle(nodes_in_sol)
         
@@ -191,7 +197,7 @@ class ClonalSelection:
     def run(self):
         self.initialize_population()
         generation = 0
-        beta_clones = 0.5 
+        beta_clones = 0.2 
 
         while self.evals < self.max_evals:
             generation += 1
@@ -207,7 +213,6 @@ class ClonalSelection:
 
             new_population = []
 
-            # RIPRISTINO: Clonazione per TUTTA la popolazione, non solo la top 50%
             for ab in self.population:
                 num_clones = max(1, int(self.pop_size * beta_clones * ab['affinity']))
                 best_match = {'solution': ab['solution'].copy(), 'cost': ab['cost'], 'affinity': ab['affinity']}
@@ -215,7 +220,7 @@ class ClonalSelection:
                 for _ in range(num_clones):
                     if self.evals >= self.max_evals: break
                     
-                    # RIPRISTINO: Tasso di mutazione originale, forte e proporzionale
+                
                     mutation_prob = 0.05 + 0.45 * (1.0 - ab['affinity'])
                     
                     mutated_sol = self.mutate_and_repair(ab['solution'], mutation_prob)
@@ -229,11 +234,13 @@ class ClonalSelection:
                 if self.evals >= self.max_evals: break
 
             memory_size = max(1, int(self.pop_size * 0.2))
-            combined_memory = self.memory + new_population
+
+            combined_memory = self.memory + new_population          #memoria composta dalla popolazione e le mutazioni
             combined_memory.sort(key=lambda x: x['cost'])
             
             unique_memory = []
             seen_signatures = set()
+
             for ind in combined_memory:
                 sig = tuple(ind['solution']) 
                 if sig not in seen_signatures:
@@ -243,19 +250,23 @@ class ClonalSelection:
                     break
             self.memory = unique_memory
 
+
+            #rimozione doppioni
             unique_pop = []
             seen_pop_sig = set()
             for ind in new_population:
-                sig = tuple(ind['solution'])
+                sig = tuple(ind['solution'])            #sig è una tupla della soluzione 
                 if sig not in seen_pop_sig:
                     seen_pop_sig.add(sig)
                     unique_pop.append(ind)
                     
+            #se ci sono meno elementi della pop_size genera altri
             while len(unique_pop) < self.pop_size and self.evals < self.max_evals:
                  sol = self.generate_greedy_solution()
                  unique_pop.append({'solution': sol, 'cost': self.calculate_cost(sol), 'affinity': 0})
                  self.evals += 1
 
+            #rimpiazza i peggiori
             unique_pop.sort(key=lambda x: x['cost'])
             if self.evals < self.max_evals:
                 num_to_replace = max(1, int(self.pop_size * 0.1))
@@ -270,17 +281,14 @@ class ClonalSelection:
                 self.best_cost_tracker = self.memory[0]['cost']
                 self.convergence_eval = self.evals
             
-            if generation % 10 == 0:
+            if generation % 5 == 0:
                 print(f"Gen {generation} | FE: {self.evals}/{self.max_evals} | Pop_Best: {self.population[0]['cost']} | MEMORY_BEST: {self.memory[0]['cost']}")
 
-        print(f"\n[!] Ricerca completata! Miglior costo finale (Memory Cell): {self.memory[0]['cost']}")
+        print(f"\nRicerca completata! Miglior costo finale (Memory Cell): {self.memory[0]['cost']}")
         return self.memory[0]
 
-# --- MAIN BLOCK: TEST BENCH MASSIVO E VALUTAZIONE AUTOMATICA ---
 if __name__ == "__main__":
-    import sys
-    import os
-    import time
+
     from collections import defaultdict
     
     cartella_istanze = "wvcp-instances" 
@@ -297,11 +305,11 @@ if __name__ == "__main__":
     }
     
     print("\n" + "="*80)
-    print(" AVVIO BENCHMARK GLOBALE (FILTRATO PER TARGETS)")
+    print(" AVVIO BENCHMARK GLOBALE")
     print("="*80)
     
     if not os.path.exists(cartella_istanze):
-        print(f"\n[-] ERRORE CRITICO: La cartella '{cartella_istanze}' non esiste!")
+        print(f"\nERRORE CRITICO: La cartella '{cartella_istanze}' non esiste!")
         sys.exit(1)
         
     file_nella_cartella = [f for f in os.listdir(cartella_istanze) if f.endswith('.txt')]
@@ -317,7 +325,7 @@ if __name__ == "__main__":
     tutti_i_file.sort()
     
     if not tutti_i_file:
-        print(f"\n[-] ERRORE CRITICO: Nessun file corrispondente ai target trovato in '{cartella_istanze}'!")
+        print(f"\n ERRORE CRITICO: Nessun file corrispondente ai target trovato in '{cartella_istanze}'!")
         sys.exit(1)
         
     print(f"[*] Trovate {len(tutti_i_file)} istanze valide. Inizio elaborazione...\n")
@@ -330,7 +338,7 @@ if __name__ == "__main__":
         parti_nome = nome_file.replace('.txt', '').split('_')
         famiglia = f"{parti_nome[0]}_{parti_nome[1]}_{parti_nome[2]}"
             
-        print(f"[*] Elaborazione: {nome_file:<20} ...", end=" ", flush=True)
+        print(f" Elaborazione: {nome_file:<20} ...", end=" ", flush=True)
         
         try:
             istanza = MWVCInstance(filepath=percorso_completo)
@@ -340,8 +348,7 @@ if __name__ == "__main__":
             
         start_time = time.time()
         
-        # NUOVO: Rimosso pop_size=50. Ora l'algoritmo calcola la dimensione ideale da solo!
-        algoritmo = ClonalSelection(istanza, max_evals=20000)
+        algoritmo = Immune_Inspired(istanza, max_evals=20000)
         miglior_soluzione = algoritmo.run()
         
         elapsed_time = time.time() - start_time
