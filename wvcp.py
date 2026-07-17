@@ -62,6 +62,7 @@ class Immune_Inspired:
         self.memory = [] 
         self.best_cost_tracker = float('inf')
         self.convergence_eval = 0
+        self.history = []  # Registro per il grafico di convergenza
 
     def is_valid(self, solution):
         for u, v in self.instance.edges:
@@ -281,17 +282,37 @@ class Immune_Inspired:
                 self.best_cost_tracker = self.memory[0]['cost']
                 self.convergence_eval = self.evals
             
+            self.history.append((self.evals, self.best_cost_tracker))
+            
             if generation % 5 == 0:
                 print(f"Gen {generation} | FE: {self.evals}/{self.max_evals} | Pop_Best: {self.population[0]['cost']} | MEMORY_BEST: {self.memory[0]['cost']}")
 
         print(f"\nRicerca completata! Miglior costo finale (Memory Cell): {self.memory[0]['cost']}")
         return self.memory[0]
 
-if __name__ == "__main__":
+import matplotlib.pyplot as plt
+import os
 
+
+if __name__ == "__main__":
+    import os
+    import sys
+    import time
+    import math
     from collections import defaultdict
+    import matplotlib.pyplot as plt 
     
     cartella_istanze = "wvcp-instances" 
+    
+    # =================================================================
+    # NUOVO: INTERRUTTORE PER TEST VELOCE DEI GRAFICI E DEBUG
+    # =================================================================
+    TEST_VELOCE = False  # Metti a False quando vuoi fare la run definitiva per la tesi
+    
+    # Se TEST_VELOCE è True, verranno eseguite SOLO queste famiglie.
+    # Scegli una piccola e una media per testare i grafici in pochi secondi.
+    FAMIGLIE_TEST = ["vc_200_750"] 
+    # =================================================================
     
     BENCHMARK_TARGETS = {
         "vc_20_60": {"avg": 861.8, "eval": 7.7},
@@ -304,12 +325,19 @@ if __name__ == "__main__":
         "vc_800_10000": {"avg": 44397.8, "best": 44396.0, "eval": 4521.9}
     }
     
+    # Applica il filtro se siamo in modalità test
+    if TEST_VELOCE:
+        BENCHMARK_TARGETS = {k: v for k, v in BENCHMARK_TARGETS.items() if k in FAMIGLIE_TEST}
+    
     print("\n" + "="*80)
-    print(" AVVIO BENCHMARK GLOBALE")
+    if TEST_VELOCE:
+        print(" AVVIO BENCHMARK GLOBALE [!!! MODALITÀ TEST VELOCE ATTIVA !!!]")
+    else:
+        print(" AVVIO BENCHMARK GLOBALE [FULL RUN]")
     print("="*80)
     
     if not os.path.exists(cartella_istanze):
-        print(f"\nERRORE CRITICO: La cartella '{cartella_istanze}' non esiste!")
+        print(f"\n[-] ERRORE CRITICO: La cartella '{cartella_istanze}' non esiste!")
         sys.exit(1)
         
     file_nella_cartella = [f for f in os.listdir(cartella_istanze) if f.endswith('.txt')]
@@ -325,12 +353,12 @@ if __name__ == "__main__":
     tutti_i_file.sort()
     
     if not tutti_i_file:
-        print(f"\n ERRORE CRITICO: Nessun file corrispondente ai target trovato in '{cartella_istanze}'!")
+        print(f"\n[-] ERRORE CRITICO: Nessun file corrispondente ai target trovato in '{cartella_istanze}'!")
         sys.exit(1)
         
     print(f"[*] Trovate {len(tutti_i_file)} istanze valide. Inizio elaborazione...\n")
     
-    risultati_raggruppati = defaultdict(lambda: {'costi': [], 'evals': []})
+    risultati_raggruppati = defaultdict(lambda: {'costi': [], 'evals': [], 'best_history': [], 'best_storico_costo': float('inf')})
 
     for nome_file in tutti_i_file:
         percorso_completo = os.path.join(cartella_istanze, nome_file)
@@ -338,7 +366,7 @@ if __name__ == "__main__":
         parti_nome = nome_file.replace('.txt', '').split('_')
         famiglia = f"{parti_nome[0]}_{parti_nome[1]}_{parti_nome[2]}"
             
-        print(f" Elaborazione: {nome_file:<20} ...", end=" ", flush=True)
+        print(f"[*] Elaborazione: {nome_file:<20} ...", end=" ", flush=True)
         
         try:
             istanza = MWVCInstance(filepath=percorso_completo)
@@ -357,6 +385,10 @@ if __name__ == "__main__":
         
         risultati_raggruppati[famiglia]['costi'].append(costo_istanza)
         risultati_raggruppati[famiglia]['evals'].append(eval_convergenza)
+        
+        if costo_istanza < risultati_raggruppati[famiglia]['best_storico_costo']:
+            risultati_raggruppati[famiglia]['best_storico_costo'] = costo_istanza
+            risultati_raggruppati[famiglia]['best_history'] = algoritmo.history.copy()
         
         print(f"Fatto! Costo: {costo_istanza:.1f} | FE: {eval_convergenza} | Tempo: {elapsed_time:.2f}s")
 
@@ -401,3 +433,124 @@ if __name__ == "__main__":
 
     print("\n" + "="*80)
     print(" TEST MASSIVO COMPLETATO!")
+
+ # --- GENERAZIONE GRAFICI SINGOLI (1 Immagine per ogni Famiglia) ---
+    print("\n[*] Generazione dei grafici di convergenza in corso...")
+    
+    # Creiamo una cartella dedicata per non riempire di file la directory principale
+    cartella_grafici = "grafici"
+    os.makedirs(cartella_grafici, exist_ok=True)
+
+    for famiglia, dati in risultati_raggruppati.items():
+        storia = dati['best_history']
+        
+        # Generiamo il grafico solo se abbiamo salvato una storia per questa famiglia
+        if storia:
+            evals = [p[0] for p in storia]
+            costi = [p[1] for p in storia]
+            
+            # 1. CREA UNA NUOVA TELA (Ogni giro del ciclo crea una tela indipendente)
+            plt.figure(figsize=(8, 5))
+            
+            # 2. DISEGNA LA CURVA
+            plt.plot(evals, costi, color='#1f77b4', linewidth=2.5, label='Miglior Costo CLONALG')
+            
+
+             
+            # 3. FORMATTAZIONE ESTETICA
+            plt.title(f'Curva di Convergenza -  {famiglia}', fontsize=14, fontweight='bold', pad=15)
+            plt.xlabel('Fitness Evaluations (FE)', fontsize=11, labelpad=10)
+            plt.ylabel('Costo del Vertex Cover', fontsize=11, labelpad=10)
+            
+            plt.grid(True, linestyle='--', alpha=0.5)
+            plt.legend(frameon=True, facecolor='white', edgecolor='none', shadow=True)
+            
+            # Rimuove i bordi in alto e a destra per un look più accademico e pulito
+            plt.gca().spines['top'].set_visible(False)
+            plt.gca().spines['right'].set_visible(False)
+            plt.tight_layout()
+            
+            # 4. SALVA IL SINGOLO FILE USANDO IL NOME DELLA FAMIGLIA
+            nome_file_grafico = os.path.join(cartella_grafici, f'convergenza_{famiglia}.png')
+            plt.savefig(nome_file_grafico, dpi=300)
+            
+            # 5. CHIUDI LA TELA (Fondamentale! Altrimenti i grafici si sovrappongono)
+            plt.close() 
+            
+    print(f"[+] Generati {len(risultati_raggruppati)} grafici separati in alta risoluzione nella cartella '{cartella_grafici}'.")
+
+
+# =================================================================
+    # --- GENERAZIONE GRAFICI A BARRE RIASSUNTIVI (COSTI E FE) ---
+    # =================================================================
+    print("\n[*] Generazione dei grafici a barre riassuntivi in corso...")
+    
+    nomi_famiglie = []
+    costi_clonalg = []
+    costi_target = []
+    fe_clonalg = []
+    fe_target = []
+
+    # Estraiamo i dati finali
+    for famiglia, dati in risultati_raggruppati.items():
+        # Accorciamo il nome per farlo entrare bene sotto le barre (es. 'vc_20_60' -> '20_60')
+        nomi_famiglie.append(famiglia.replace('vc_', ''))
+        
+        media_costo = sum(dati['costi']) / len(dati['costi'])
+        media_eval = sum(dati['evals']) / len(dati['evals'])
+        
+        target = BENCHMARK_TARGETS.get(famiglia)
+        target_cost = target['avg']
+        target_fe = target['eval']
+        
+        costi_clonalg.append(media_costo)
+        costi_target.append(target_cost)
+        fe_clonalg.append(media_eval)
+        fe_target.append(target_fe)
+
+    import numpy as np
+    x = np.arange(len(nomi_famiglie))
+    width = 0.35  # Spessore delle barre
+
+    # --- GRAFICO 1: CONFRONTO COSTI ---
+    plt.figure(figsize=(10, 6))
+    plt.bar(x - width/2, costi_clonalg, width, label='CLONALG', color='#1f77b4')
+    plt.bar(x + width/2, costi_target, width, label='Target (PBIG)', color='#ff7f0e')
+
+    plt.ylabel('Costo Medio', fontsize=12)
+    plt.title('Confronto Costo Medio: CLONALG vs Stato dell\'Arte', fontsize=15, fontweight='bold', pad=20)
+    plt.xticks(x, nomi_famiglie, rotation=45, ha='right')
+    plt.legend(fontsize=11)
+    
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(cartella_grafici, 'riassunto_costi.png'), dpi=300)
+    plt.close()
+
+    # --- GRAFICO 2: CONFRONTO FE ---
+    plt.figure(figsize=(10, 6))
+    plt.bar(x - width/2, fe_clonalg, width, label='CLONALG', color='#2ca02c')
+    plt.bar(x + width/2, fe_target, width, label='Target (PBIG)', color='#d62728')
+
+    plt.ylabel('Fitness Evaluations Medie (Scala Logaritmica)', fontsize=12)
+    plt.title('Confronto Valutazioni (FE): CLONALG vs Stato dell\'Arte', fontsize=15, fontweight='bold', pad=20)
+    plt.xticks(x, nomi_famiglie, rotation=45, ha='right')
+    plt.legend(fontsize=11)
+    
+    plt.yscale('log') # Imposta l'asse Y in scala logaritmica
+    
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['right'].set_visible(False)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(cartella_grafici, 'riassunto_fe.png'), dpi=300)
+    plt.close()
+
+    print(f"[+] Generati con successo i due grafici riassuntivi a barre nella cartella '{cartella_grafici}'!")
+    print("\n" + "="*80)
+    print(" TUTTE LE OPERAZIONI SONO CONCLUSE CON SUCCESSO! ")
+    print("="*80)
