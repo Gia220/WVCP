@@ -2,17 +2,19 @@ import random
 import sys
 import os
 import time
+from collections import defaultdict
+import matplotlib.pyplot as plt
+import numpy as np
 
-class MWVCInstance:
-    """
-    Classe che rappresenta un'istanza del problema WVCP.
-    """
+class WVCPInstance:
+
+
     def __init__(self, filepath=None, raw_data=None):
         self.num_nodes = 0
         self.weights = []
         self.adj_matrix = []
         self.edges = []
-        self.adj_list = [] # Lista di adiacenza per calcoli super-veloci
+        self.adj_list = [] 
         
         if filepath:
             with open(filepath, 'r') as f:
@@ -41,16 +43,12 @@ class MWVCInstance:
                     
         print(f"Istanza caricata con successo: {self.num_nodes} nodi, {len(self.edges)} archi.")
 
-
-class Immune_Inspired:
-    """
-    Algoritmo basato sul Principio di Selezione Clonale (Artificial Immune System)
-    """
+class Immune_Inspired_Algorithm:
 
     def __init__(self, instance, pop_size=None, max_evals=20000):
         self.instance = instance
         
-        # Popolazione Auto-Adattiva basata sulla grandezza dell'istanza! (25% del numero di nodi. Minimo 15 individui, Massimo 100.)
+        # Popolazione Auto-Adattiva basata sulla grandezza dell'istanza! (20% del numero di nodi. Minimo 10 individui, Massimo 100.)
         if pop_size is None:
             self.pop_size = max(10, min(100, int(self.instance.num_nodes * 0.20)))
         else:
@@ -290,31 +288,17 @@ class Immune_Inspired:
         print(f"\nRicerca completata! Miglior costo finale (Memory Cell): {self.memory[0]['cost']}")
         return self.memory[0]
 
-import matplotlib.pyplot as plt
-import os
+
+# COSTANTI GLOBALI
+CARTELLA_ISTANZE = "wvcp-instances" 
+CARTELLA_GRAFICI = "grafici"
+TEST_VELOCE = False 
+FAMIGLIE_TEST = ["vc_20_60", "vc_100_500"] 
 
 
-if __name__ == "__main__":
-    import os
-    import sys
-    import time
-    import math
-    from collections import defaultdict
-    import matplotlib.pyplot as plt 
-    
-    cartella_istanze = "wvcp-instances" 
-    
-    # =================================================================
-    # NUOVO: INTERRUTTORE PER TEST VELOCE DEI GRAFICI E DEBUG
-    # =================================================================
-    TEST_VELOCE = False  # Metti a False quando vuoi fare la run definitiva per la tesi
-    
-    # Se TEST_VELOCE è True, verranno eseguite SOLO queste famiglie.
-    # Scegli una piccola e una media per testare i grafici in pochi secondi.
-    FAMIGLIE_TEST = ["vc_200_750"] 
-    # =================================================================
-    
-    BENCHMARK_TARGETS = {
+def benchmark_targets():
+    """Restituisce il dizionario dei target, filtrandolo se in TEST_VELOCE."""
+    targets = {
         "vc_20_60": {"avg": 861.8, "eval": 7.7},
         "vc_20_120": {"avg": 1038.2, "eval": 5.2},
         "vc_25_150": {"avg": 1264.0, "eval": 21.0},
@@ -325,232 +309,204 @@ if __name__ == "__main__":
         "vc_800_10000": {"avg": 44397.8, "best": 44396.0, "eval": 4521.9}
     }
     
-    # Applica il filtro se siamo in modalità test
     if TEST_VELOCE:
-        BENCHMARK_TARGETS = {k: v for k, v in BENCHMARK_TARGETS.items() if k in FAMIGLIE_TEST}
-    
-    print("\n" + "="*80)
-    if TEST_VELOCE:
-        print(" AVVIO BENCHMARK GLOBALE [!!! MODALITÀ TEST VELOCE ATTIVA !!!]")
-    else:
-        print(" AVVIO BENCHMARK GLOBALE [FULL RUN]")
-    print("="*80)
-    
+        targets = {k: v for k, v in targets.items() if k in FAMIGLIE_TEST}
+        
+    return targets
+
+def istanze_valide(cartella_istanze, targets):
+    """Cerca e restituisce la lista dei file validi per il benchmark."""
+
     if not os.path.exists(cartella_istanze):
         print(f"\n[-] ERRORE CRITICO: La cartella '{cartella_istanze}' non esiste!")
         sys.exit(1)
         
-    file_nella_cartella = [f for f in os.listdir(cartella_istanze) if f.endswith('.txt')]
     tutti_i_file = []
-    
-    for nome_file in file_nella_cartella:
-        parti_nome = nome_file.replace('.txt', '').split('_')
-        if len(parti_nome) >= 3:
-            famiglia = f"{parti_nome[0]}_{parti_nome[1]}_{parti_nome[2]}"
-            if famiglia in BENCHMARK_TARGETS:
-                tutti_i_file.append(nome_file)
-                
+    for nome_file in os.listdir(cartella_istanze):
+        if nome_file.endswith('.txt'):
+            parti_nome = nome_file.replace('.txt', '').split('_')
+            if len(parti_nome) >= 3:
+                famiglia = f"{parti_nome[0]}_{parti_nome[1]}_{parti_nome[2]}"
+                if famiglia in targets:
+                    tutti_i_file.append(nome_file)
+                    
     tutti_i_file.sort()
     
     if not tutti_i_file:
-        print(f"\n[-] ERRORE CRITICO: Nessun file corrispondente ai target trovato in '{cartella_istanze}'!")
+        print(f"\n ERRORE CRITICO: Nessun file corrispondente ai target trovato in '{cartella_istanze}'!")
         sys.exit(1)
         
-    print(f"[*] Trovate {len(tutti_i_file)} istanze valide. Inizio elaborazione...\n")
-    
-    risultati_raggruppati = defaultdict(lambda: {'costi': [], 'evals': [], 'best_history': [], 'best_storico_costo': float('inf')})
+    return tutti_i_file
 
-    for nome_file in tutti_i_file:
+def elaborazione_totale(lista_file, cartella_istanze):
+    """Esegue l'algoritmo su tutte le istanze e raccoglie i dati."""
+    print(f" Trovate {len(lista_file)} istanze valide. Inizio elaborazione...\n")
+    
+    risultati = defaultdict(lambda: {'costi': [], 'evals': [], 'best_history': [], 'best_storico_costo': float('inf')})
+
+    for nome_file in lista_file:
         percorso_completo = os.path.join(cartella_istanze, nome_file)
-        
-        parti_nome = nome_file.replace('.txt', '').split('_')
-        famiglia = f"{parti_nome[0]}_{parti_nome[1]}_{parti_nome[2]}"
+        famiglia = "_".join(nome_file.replace('.txt', '').split('_')[:3])
             
-        print(f"[*] Elaborazione: {nome_file:<20} ...", end=" ", flush=True)
+        print(f" Elaborazione: {nome_file:<20} ...", end=" ", flush=True)
         
         try:
-            istanza = MWVCInstance(filepath=percorso_completo)
+            istanza = WVCPInstance(filepath=percorso_completo)
         except Exception as e:
-            print(f"[-] Errore: {e}")
+            print(f"[-] Errore caricamento istanza: {e}")
             continue
             
         start_time = time.time()
-        
-        algoritmo = Immune_Inspired(istanza, max_evals=20000)
+        algoritmo = Immune_Inspired_Algorithm(istanza, max_evals=20000) 
         miglior_soluzione = algoritmo.run()
-        
         elapsed_time = time.time() - start_time
-        costo_istanza = miglior_soluzione['cost']
-        eval_convergenza = algoritmo.convergence_eval
         
-        risultati_raggruppati[famiglia]['costi'].append(costo_istanza)
-        risultati_raggruppati[famiglia]['evals'].append(eval_convergenza)
+        costo = miglior_soluzione['cost']
+        evals = algoritmo.convergence_eval
         
-        if costo_istanza < risultati_raggruppati[famiglia]['best_storico_costo']:
-            risultati_raggruppati[famiglia]['best_storico_costo'] = costo_istanza
-            risultati_raggruppati[famiglia]['best_history'] = algoritmo.history.copy()
+        risultati[famiglia]['costi'].append(costo)
+        risultati[famiglia]['evals'].append(evals)
         
-        print(f"Fatto! Costo: {costo_istanza:.1f} | FE: {eval_convergenza} | Tempo: {elapsed_time:.2f}s")
+        if costo < risultati[famiglia]['best_storico_costo']:
+            risultati[famiglia]['best_storico_costo'] = costo
+            risultati[famiglia]['best_history'] = algoritmo.history.copy()
+        
+        print(f"Fatto! Costo: {costo:.1f} | FE: {evals} | Tempo: {elapsed_time:.2f}s")
+        
+    return risultati
+
+def report_testuale(risultati, targets):
 
     print("\n\n" + "#"*80)
     print(" REPORT DI VALUTAZIONE FINALE (Confronto con PBIG/ACO)")
     print("#"*80)
     
-    for famiglia, dati in risultati_raggruppati.items():
-        costi = dati['costi']
-        evals = dati['evals']
+    for famiglia, dati in risultati.items():
+        media_costo = sum(dati['costi']) / len(dati['costi'])
+        media_eval = sum(dati['evals']) / len(dati['evals'])
+        target = targets.get(famiglia)
         
-        media_costo = sum(costi) / len(costi)
-        best_costo = min(costi)
-        media_eval = sum(evals) / len(evals)
-        
-        target = BENCHMARK_TARGETS.get(famiglia)
-        
-        print(f"\n--- FAMIGLIA: {famiglia} (Testate {len(costi)} istanze) ---")
-        
+        print(f"\n--- FAMIGLIA: {famiglia} (Testate {len(dati['costi'])} istanze) ---")
         if target:
             diff_media = media_costo - target['avg']
-            segno_media = "+" if diff_media > 0 else ""
             val_media = "OTTIMO/MIGLIORE" if diff_media <= 0 else "Da ottimizzare"
-            
-            print(f"  [COSTO] Media CLONALG: \t{media_costo:.2f}")
-            print(f"  [COSTO] Media Target:  \t{target['avg']:.2f} \t[{segno_media}{diff_media:.2f} -> {val_media}]")
+            print(f"  [COSTO] Media IA: \t{media_costo:.2f}")
+            print(f"  [COSTO] Media Target:  \t{target['avg']:.2f} \t[{'+' if diff_media > 0 else ''}{diff_media:.2f} -> {val_media}]")
             
             diff_eval = media_eval - target['eval']
-            segno_eval = "+" if diff_eval > 0 else ""
             val_eval = "PIÙ VELOCE" if diff_eval <= 0 else "Più lento"
-            
-            print(f"  [EVALS] Media CLONALG: \t{media_eval:.1f} FE")
-            print(f"  [EVALS] Media Target:  \t{target['eval']:.1f} FE \t[{segno_eval}{diff_eval:.1f} -> {val_eval}]")
-            
-            if 'best' in target:
-                diff_best = best_costo - target['best']
-                segno_best = "+" if diff_best > 0 else ""
-                val_best = "OTTIMO/MIGLIORE" if diff_best <= 0 else "Da ottimizzare"
-                
-                print(f"  [BEST ] Best CLONALG:  \t{best_costo:.2f}")
-                print(f"  [BEST ] Best Target:   \t{target['best']:.2f} \t[{segno_best}{diff_best:.2f} -> {val_best}]")
+            print(f"  [EVALS] Media IA: \t{media_eval:.1f} FE")
+            print(f"  [EVALS] Media Target:  \t{target['eval']:.1f} FE \t[{'+' if diff_eval > 0 else ''}{diff_eval:.1f} -> {val_eval}]")
 
     print("\n" + "="*80)
     print(" TEST MASSIVO COMPLETATO!")
 
- # --- GENERAZIONE GRAFICI SINGOLI (1 Immagine per ogni Famiglia) ---
+def grafici_convergenza(risultati, cartella_grafici):
+    """Genera i plot a linea singoli per la storia di convergenza."""
     print("\n[*] Generazione dei grafici di convergenza in corso...")
-    
-    # Creiamo una cartella dedicata per non riempire di file la directory principale
-    cartella_grafici = "grafici"
     os.makedirs(cartella_grafici, exist_ok=True)
 
-    for famiglia, dati in risultati_raggruppati.items():
+    for famiglia, dati in risultati.items():
         storia = dati['best_history']
-        
-        # Generiamo il grafico solo se abbiamo salvato una storia per questa famiglia
         if storia:
-            evals = [p[0] for p in storia]
-            costi = [p[1] for p in storia]
+            evals_hist = [p[0] for p in storia]
+            costi_hist = [p[1] for p in storia]
             
-            # 1. CREA UNA NUOVA TELA (Ogni giro del ciclo crea una tela indipendente)
             plt.figure(figsize=(8, 5))
+            plt.plot(evals_hist, costi_hist, color='#1f77b4', linewidth=2.5, label='Miglior Costo IA')
             
-            # 2. DISEGNA LA CURVA
-            plt.plot(evals, costi, color='#1f77b4', linewidth=2.5, label='Miglior Costo CLONALG')
-            
-
-             
-            # 3. FORMATTAZIONE ESTETICA
-            plt.title(f'Curva di Convergenza -  {famiglia}', fontsize=14, fontweight='bold', pad=15)
+            plt.title(f'Curva di Convergenza - {famiglia}', fontsize=14, fontweight='bold', pad=15)
             plt.xlabel('Fitness Evaluations (FE)', fontsize=11, labelpad=10)
             plt.ylabel('Costo del Vertex Cover', fontsize=11, labelpad=10)
             
             plt.grid(True, linestyle='--', alpha=0.5)
             plt.legend(frameon=True, facecolor='white', edgecolor='none', shadow=True)
-            
-            # Rimuove i bordi in alto e a destra per un look più accademico e pulito
             plt.gca().spines['top'].set_visible(False)
             plt.gca().spines['right'].set_visible(False)
             plt.tight_layout()
             
-            # 4. SALVA IL SINGOLO FILE USANDO IL NOME DELLA FAMIGLIA
-            nome_file_grafico = os.path.join(cartella_grafici, f'convergenza_{famiglia}.png')
-            plt.savefig(nome_file_grafico, dpi=300)
-            
-            # 5. CHIUDI LA TELA (Fondamentale! Altrimenti i grafici si sovrappongono)
+            plt.savefig(os.path.join(cartella_grafici, f'convergenza_{famiglia}.png'), dpi=300)
             plt.close() 
             
-    print(f"[+] Generati {len(risultati_raggruppati)} grafici separati in alta risoluzione nella cartella '{cartella_grafici}'.")
+    print(f"[+] Generati {len(risultati)} grafici di convergenza in '{cartella_grafici}'.")
 
-
-# =================================================================
-    # --- GENERAZIONE GRAFICI A BARRE RIASSUNTIVI (COSTI E FE) ---
-    # =================================================================
-    print("\n[*] Generazione dei grafici a barre riassuntivi in corso...")
+def genera_grafici_riassuntivi(risultati, targets, cartella_grafici):
+    """Genera i grafici a barre riassuntivi per Costi e FE."""
+    print("[*] Generazione dei grafici a barre riassuntivi in corso...")
     
-    nomi_famiglie = []
-    costi_clonalg = []
-    costi_target = []
-    fe_clonalg = []
-    fe_target = []
+    nomi_famiglie, costi_IA, costi_target, fe_IA, fe_target = [], [], [], [], []
 
-    # Estraiamo i dati finali
-    for famiglia, dati in risultati_raggruppati.items():
-        # Accorciamo il nome per farlo entrare bene sotto le barre (es. 'vc_20_60' -> '20_60')
+    for famiglia, dati in risultati.items():
         nomi_famiglie.append(famiglia.replace('vc_', ''))
-        
-        media_costo = sum(dati['costi']) / len(dati['costi'])
-        media_eval = sum(dati['evals']) / len(dati['evals'])
-        
-        target = BENCHMARK_TARGETS.get(famiglia)
-        target_cost = target['avg']
-        target_fe = target['eval']
-        
-        costi_clonalg.append(media_costo)
-        costi_target.append(target_cost)
-        fe_clonalg.append(media_eval)
-        fe_target.append(target_fe)
+        costi_IA.append(sum(dati['costi']) / len(dati['costi']))
+        fe_IA.append(sum(dati['evals']) / len(dati['evals']))
+        costi_target.append(targets[famiglia]['avg'])
+        fe_target.append(targets[famiglia]['eval'])
 
-    import numpy as np
-    x = np.arange(len(nomi_famiglie))
-    width = 0.35  # Spessore delle barre
+    x_pos = np.arange(len(nomi_famiglie))
+    width = 0.35 
 
-    # --- GRAFICO 1: CONFRONTO COSTI ---
-    plt.figure(figsize=(10, 6))
-    plt.bar(x - width/2, costi_clonalg, width, label='CLONALG', color='#1f77b4')
-    plt.bar(x + width/2, costi_target, width, label='Target (PBIG)', color='#ff7f0e')
+    # --- GRAFICO A BARRE: COSTI ---
+    plt.figure(figsize=(12, 6))
+    plt.bar(x_pos - width/2, costi_IA, width, label='IA', color='#1f77b4')
+    plt.bar(x_pos + width/2, costi_target, width, label='Target (PBIG)', color='#ff7f0e')
 
     plt.ylabel('Costo Medio', fontsize=12)
-    plt.title('Confronto Costo Medio: CLONALG vs Stato dell\'Arte', fontsize=15, fontweight='bold', pad=20)
-    plt.xticks(x, nomi_famiglie, rotation=45, ha='right')
-    plt.legend(fontsize=11)
-    
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.title('Confronto Costo Medio', fontsize=15, fontweight='bold', pad=20)
+    plt.xticks(x_pos, nomi_famiglie, rotation=45, ha='right')
+    plt.legend(fontsize=11, loc='upper left')
+    plt.grid(axis='y', linestyle='--', alpha=0.5)
     plt.gca().spines['top'].set_visible(False)
     plt.gca().spines['right'].set_visible(False)
-    
+    plt.ylim(0, max(max(costi_IA), max(costi_target)) * 1.1) 
     plt.tight_layout()
     plt.savefig(os.path.join(cartella_grafici, 'riassunto_costi.png'), dpi=300)
     plt.close()
 
-    # --- GRAFICO 2: CONFRONTO FE ---
+    # --- GRAFICO A BARRE: VALUTAZIONI (FE) ---
     plt.figure(figsize=(10, 6))
-    plt.bar(x - width/2, fe_clonalg, width, label='CLONALG', color='#2ca02c')
-    plt.bar(x + width/2, fe_target, width, label='Target (PBIG)', color='#d62728')
+    barre_ia = plt.bar(x_pos - width/2, fe_IA, width, label='IA', color='#2ca02c')
+    barre_target = plt.bar(x_pos + width/2, fe_target, width, label='Target (PBIG)', color='#d62728')
 
-    plt.ylabel('Fitness Evaluations Medie (Scala Logaritmica)', fontsize=12)
-    plt.title('Confronto Valutazioni (FE): CLONALG vs Stato dell\'Arte', fontsize=15, fontweight='bold', pad=20)
-    plt.xticks(x, nomi_famiglie, rotation=45, ha='right')
+    plt.gca().bar_label(barre_ia, padding=3, fmt='%.1f', fontsize=10, fontweight='bold', color='#2ca02c')
+    plt.gca().bar_label(barre_target, padding=3, fmt='%.1f', fontsize=10, fontweight='bold', color='#d62728')
+
+    plt.ylabel('Fitness Evaluations Medie', fontsize=12)
+    plt.title('Confronto Valutazioni (FE)', fontsize=15, fontweight='bold', pad=20)
+    plt.xticks(x_pos, nomi_famiglie, rotation=45, ha='right')
     plt.legend(fontsize=11)
-    
-    plt.yscale('log') # Imposta l'asse Y in scala logaritmica
-    
+    plt.yscale('log')
     plt.grid(axis='y', linestyle='--', alpha=0.7)
     plt.gca().spines['top'].set_visible(False)
     plt.gca().spines['right'].set_visible(False)
-    
     plt.tight_layout()
     plt.savefig(os.path.join(cartella_grafici, 'riassunto_fe.png'), dpi=300)
     plt.close()
 
-    print(f"[+] Generati con successo i due grafici riassuntivi a barre nella cartella '{cartella_grafici}'!")
+    print(f"[+] Generati grafici riassuntivi a barre in '{cartella_grafici}'.")
     print("\n" + "="*80)
     print(" TUTTE LE OPERAZIONI SONO CONCLUSE CON SUCCESSO! ")
     print("="*80)
+
+
+def main():
+    print("\n" + "="*80)
+    print(" AVVIO BENCHMARK GLOBALE " + ("[MODALITÀ TEST VELOCE]" if TEST_VELOCE else "[FULL RUN]"))
+    print("="*80)
+
+    targets = benchmark_targets()
+    
+    # cerca i file dalla cartella
+    file_da_elaborare = istanze_valide(CARTELLA_ISTANZE, targets)
+    
+    # calcolo per tutte le instanze
+    risultati_finali = elaborazione_totale(file_da_elaborare, CARTELLA_ISTANZE)
+    
+    report_testuale(risultati_finali, targets)
+    
+
+    grafici_convergenza(risultati_finali, CARTELLA_GRAFICI)
+    genera_grafici_riassuntivi(risultati_finali, targets, CARTELLA_GRAFICI)
+
+if __name__ == "__main__":
+    main()
