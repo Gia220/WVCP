@@ -75,10 +75,10 @@ class Immune_Inspired_Algorithm:
         """ Genera soluzione con K-Tournament e Redundancy Removal """
 
         sol = [0] * self.instance.num_nodes                                     #inizializzazione
-        uncovered_degree = [len(adj) for adj in self.instance.adj_list]         #per ogni nod dice quanti archi non sono stati assegnati
+        uncovered_degree = [len(adj) for adj in self.instance.adj_list]         #numero di archi per ogni nodi da assegnare
         uncovered_edges_count = len(self.instance.edges)                        #numero totale di archi da dover ancora assengare
         
-        active_nodes = {i for i in range(self.instance.num_nodes) if uncovered_degree[i] > 0}           #nodi da attivare
+        active_nodes = {i for i in range(self.instance.num_nodes) if uncovered_degree[i] > 0}           #nodi con almeno un grado di libertà
         
         while uncovered_edges_count > 0:
             
@@ -97,7 +97,7 @@ class Immune_Inspired_Algorithm:
                     best_node = node
                     
             sol[best_node] = 1                                                  #migliore del torneo è impostato a 1
-            active_nodes.discard(best_node)                                     # Rimuoviamo il nodo scelto dai candidati
+            active_nodes.discard(best_node)                                     #Rimuoviamo il nodo scelto dai candidati
             
             #assegnazione ai vicini 
             for neighbor in self.instance.adj_list[best_node]:
@@ -126,12 +126,12 @@ class Immune_Inspired_Algorithm:
         return sol
 
     def initialize_population(self):
-        print("Generazione pop")
+        print("Generazione popolazione iniziale.")
         for _ in range(self.pop_size):
             sol = self.generate_greedy_solution()
             cost = self.calculate_cost(sol)
-            self.population.append({'solution': sol, 'cost': cost, 'affinity': 0})
             self.evals += 1
+            self.population.append({'solution': sol, 'cost': cost, 'affinity': 0})
             
         self.population.sort(key=lambda x: x['cost'])                                       #popolazione ordinata in base al costo
         self.memory = self.population[:max(1, int(self.pop_size * 0.2))].copy()             #copia la top 20 %  delle soluzionio 
@@ -193,6 +193,7 @@ class Immune_Inspired_Algorithm:
                 
         return mutated
 
+
     def run(self):
         self.initialize_population()
         generation = 0
@@ -249,7 +250,6 @@ class Immune_Inspired_Algorithm:
                     break
             self.memory = unique_memory
 
-
             #rimozione doppioni
             unique_pop = []
             seen_pop_sig = set()
@@ -265,14 +265,33 @@ class Immune_Inspired_Algorithm:
                  unique_pop.append({'solution': sol, 'cost': self.calculate_cost(sol), 'affinity': 0})
                  self.evals += 1
 
-            #rimpiazza i peggiori
-            unique_pop.sort(key=lambda x: x['cost'])
+
+            unique_pop.sort(key=lambda x: x['cost']) 
+            
             if self.evals < self.max_evals:
-                num_to_replace = max(1, int(self.pop_size * 0.1))
-                for i in range(len(unique_pop) - num_to_replace, len(unique_pop)):
-                    sol = self.generate_greedy_solution()
-                    unique_pop[i] = {'solution': sol, 'cost': self.calculate_cost(sol), 'affinity': 0}
-                    self.evals += 1
+                #  MEMORY REINTRODUCTION
+                # Ogni 10 generazioni, i campioni in memoria rimpiazzano gli anticorpi peggiori
+                if generation % 10 == 0 and len(self.memory) > 0:
+                    num_to_inject = max(1, int(self.pop_size * 0.1))
+                    num_to_inject = min(num_to_inject, len(self.memory))
+                    
+                    for i in range(num_to_inject):
+                        indice_da_sostituire = len(unique_pop) - 1 - i
+                        anticorpo_memoria = {
+                            'solution': list(self.memory[i]['solution']), # deep copy
+                            'cost': self.memory[i]['cost'],
+                            'affinity': 0 
+                        }
+                        unique_pop[indice_da_sostituire] = anticorpo_memoria
+
+                # RECEPTOR EDITING 
+                # Ogni 5 generazioni, i peggiori vengono sostituiti con soluzioni casuali nuove
+                elif generation % 5 == 0:
+                    num_to_replace = max(1, int(self.pop_size * 0.1))
+                    for i in range(len(unique_pop) - num_to_replace, len(unique_pop)):
+                        sol = self.generate_greedy_solution()
+                        unique_pop[i] = {'solution': sol, 'cost': self.calculate_cost(sol), 'affinity': 0}
+                        self.evals += 1
 
             self.population = unique_pop
             
@@ -287,7 +306,6 @@ class Immune_Inspired_Algorithm:
 
         print(f"\nRicerca completata! Miglior costo finale (Memory Cell): {self.memory[0]['cost']}")
         return self.memory[0]
-
 
 # COSTANTI GLOBALI
 CARTELLA_ISTANZE = "wvcp-instances" 
