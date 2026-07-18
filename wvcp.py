@@ -311,7 +311,7 @@ class Immune_Inspired_Algorithm:
 CARTELLA_ISTANZE = "wvcp-instances" 
 CARTELLA_GRAFICI = "grafici"
 TEST_VELOCE = False 
-FAMIGLIE_TEST = ["vc_20_60", "vc_100_500"] 
+FAMIGLIE_TEST = ["vc_200_750"] 
 
 
 def benchmark_targets():
@@ -360,7 +360,14 @@ def elaborazione_totale(lista_file, cartella_istanze):
     """Esegue l'algoritmo su tutte le istanze e raccoglie i dati."""
     print(f" Trovate {len(lista_file)} istanze valide. Inizio elaborazione...\n")
     
-    risultati = defaultdict(lambda: {'costi': [], 'evals': [], 'best_history': [], 'best_storico_costo': float('inf')})
+    # MODIFICA: Aggiunto 'all_histories' per salvare i grafici di tutte le 10 run
+    risultati = defaultdict(lambda: {
+        'costi': [], 
+        'evals': [], 
+        'best_history': [], 
+        'best_storico_costo': float('inf'),
+        'all_histories': [] 
+    })
 
     for nome_file in lista_file:
         percorso_completo = os.path.join(cartella_istanze, nome_file)
@@ -384,6 +391,9 @@ def elaborazione_totale(lista_file, cartella_istanze):
         
         risultati[famiglia]['costi'].append(costo)
         risultati[famiglia]['evals'].append(evals)
+        
+        # MODIFICA: Salviamo la storia di QUESTA singola run nell'archivio totale
+        risultati[famiglia]['all_histories'].append(algoritmo.history.copy())
         
         if costo < risultati[famiglia]['best_storico_costo']:
             risultati[famiglia]['best_storico_costo'] = costo
@@ -420,33 +430,80 @@ def report_testuale(risultati, targets):
     print(" TEST MASSIVO COMPLETATO!")
 
 def grafici_convergenza(risultati, cartella_grafici):
-    """Genera i plot a linea singoli per la storia di convergenza."""
+    """Genera i plot con tutte le run, la media e la run migliore."""
     print("\n[*] Generazione dei grafici di convergenza in corso...")
     os.makedirs(cartella_grafici, exist_ok=True)
 
     for famiglia, dati in risultati.items():
-        storia = dati['best_history']
-        if storia:
-            evals_hist = [p[0] for p in storia]
-            costi_hist = [p[1] for p in storia]
+        tutte_le_storie = dati['all_histories']
+
+        if not tutte_le_storie:
+            continue
+
+        plt.figure(figsize=(10, 6)) # Leggermente allargato per comodità
+
+        # 1. Trova la lunghezza massima dell'asse X (FE) per poter calcolare la media
+        max_fe = 0
+        for storia in tutte_le_storie:
+            if storia:
+                max_fe = max(max_fe, storia[-1][0])
+                
+        if max_fe == 0:
+            continue
+
+        # Creiamo un asse X comune di 500 punti per allineare matematicamente le varie run
+        x_common = np.linspace(0, max_fe, 500)
+        y_somma = np.zeros(500)
+        run_valide = 0
+
+        # === MODIFICA QUI: Generazione dei colori ===
+        # Prendiamo 10 colori distinti dalla palette 'tab10'
+        colori_run = plt.cm.tab10(np.linspace(0, 1, 10))
+
+        # 2. DISEGNA LE SINGOLE RUN
+        for i, storia in enumerate(tutte_le_storie):
+            if not storia:
+                continue
+            xs = [p[0] for p in storia]
+            ys = [p[1] for p in storia]
             
-            plt.figure(figsize=(8, 5))
-            plt.plot(evals_hist, costi_hist, color='#1f77b4', linewidth=2.5, label='Miglior Costo IA')
+            # Etichetta solo per la prima run, per non intaccare la legenda 10 volte
+            label_singola = 'Singole Run' if i == 0 else ""
             
-            plt.title(f'Curva di Convergenza - {famiglia}', fontsize=14, fontweight='bold', pad=15)
-            plt.xlabel('Fitness Evaluations (FE)', fontsize=11, labelpad=10)
-            plt.ylabel('Costo del Vertex Cover', fontsize=11, labelpad=10)
+            # Assegniamo un colore diverso ad ogni run usando l'indice 'i'
+            # (Usiamo il modulo % 10 nel caso in cui ci siano più di 10 run)
+            colore_corrente = colori_run[i % 10]
             
-            plt.grid(True, linestyle='--', alpha=0.5)
-            plt.legend(frameon=True, facecolor='white', edgecolor='none', shadow=True)
-            plt.gca().spines['top'].set_visible(False)
-            plt.gca().spines['right'].set_visible(False)
-            plt.tight_layout()
+            # Traccia la singola run
+            plt.plot(xs, ys, color=colore_corrente, alpha=0.75, linewidth=1.5, label=label_singola)
             
-            plt.savefig(os.path.join(cartella_grafici, f'convergenza_{famiglia}.png'), dpi=300)
-            plt.close() 
+            # Interpola i valori y su x_common per poterli sommare
+            y_interp = np.interp(x_common, xs, ys)
+            y_somma += y_interp
+            run_valide += 1
+
+        # 3. CALCOLA E DISEGNA LA MEDIA GLOBALE
+        if run_valide > 0:
+            y_media = y_somma / run_valide
+            # Usiamo un rosso scuro (#d62728) tratteggiato e più spesso per far risaltare la media
+            plt.plot(x_common, y_media, color='#d62728', linestyle='--', linewidth=3, label='Convergenza Media')
+
+
+        # Formattazione estetica
+        plt.title(f'Convergenza Globale - Famiglia: {famiglia}', fontsize=14, fontweight='bold', pad=15)
+        plt.xlabel('Fitness Evaluations (FE)', fontsize=11, labelpad=10)
+        plt.ylabel('Costo del Vertex Cover', fontsize=11, labelpad=10)
+        
+        plt.grid(True, linestyle='--', alpha=0.5)
+        plt.legend(frameon=True, facecolor='white', edgecolor='none', shadow=True)
+        plt.gca().spines['top'].set_visible(False)
+        plt.gca().spines['right'].set_visible(False)
+        plt.tight_layout()
+        
+        plt.savefig(os.path.join(cartella_grafici, f'convergenza_{famiglia}.png'), dpi=300)
+        plt.close() 
             
-    print(f"[+] Generati {len(risultati)} grafici di convergenza in '{cartella_grafici}'.")
+    print(f"[+] Generati {len(risultati)} grafici di convergenza dettagliati in '{cartella_grafici}'.")
 
 def genera_grafici_riassuntivi(risultati, targets, cartella_grafici):
     """Genera i grafici a barre riassuntivi per Costi e FE."""
