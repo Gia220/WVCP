@@ -125,7 +125,7 @@ class Immune_Inspired_Algorithm:
                 
         return sol
 
-    def initialize_population(self):
+    def initialize_population2(self):
         print("Generazione popolazione iniziale.")
         for _ in range(self.pop_size):
             sol = self.generate_greedy_solution()
@@ -135,6 +135,25 @@ class Immune_Inspired_Algorithm:
             
         self.population.sort(key=lambda x: x['cost'])                                       #popolazione ordinata in base al costo
         self.memory = self.population[:max(1, int(self.pop_size * 0.2))].copy()             #copia la top 20 %  delle soluzionio 
+
+    def initialize_population(self):
+        print("Generazione popolazione iniziale.")
+        for _ in range(self.pop_size):
+            sol = self.generate_greedy_solution()
+            cost = self.calculate_cost(sol)
+            self.evals += 1
+            self.population.append({'solution': sol, 'cost': cost, 'affinity': 0})
+            
+
+            if self.evals == 1:
+                self.best_cost_tracker = cost
+                self.history.append((self.evals, self.best_cost_tracker))
+            elif cost < self.best_cost_tracker:
+                self.best_cost_tracker = cost
+                self.history.append((self.evals, self.best_cost_tracker))
+            
+        self.population.sort(key=lambda x: x['cost'])                                       # Popolazione ordinata in base al costo
+        self.memory = self.population[:max(1, int(self.pop_size * 0.2))].copy()             # Copia la top 20% delle soluzioni
 
     def mutate_and_repair(self, solution, mutation_prob):
         mutated = solution.copy()                               #clonazione
@@ -193,7 +212,6 @@ class Immune_Inspired_Algorithm:
                 
         return mutated
 
-
     def run(self):
         self.initialize_population()
         generation = 0
@@ -202,9 +220,9 @@ class Immune_Inspired_Algorithm:
         while self.evals < self.max_evals:
             generation += 1
             
+            #calcolo affinità
             costs = [ab['cost'] for ab in self.population]
             min_cost, max_cost = min(costs), max(costs)
-            
             for ab in self.population:
                 if max_cost == min_cost:
                     ab['affinity'] = 1.0
@@ -220,7 +238,6 @@ class Immune_Inspired_Algorithm:
                 for _ in range(num_clones):
                     if self.evals >= self.max_evals: break
                     
-                
                     mutation_prob = 0.05 + 0.45 * (1.0 - ab['affinity'])
                     
                     mutated_sol = self.mutate_and_repair(ab['solution'], mutation_prob)
@@ -238,9 +255,10 @@ class Immune_Inspired_Algorithm:
             combined_memory = self.memory + new_population          #memoria composta dalla popolazione e le mutazioni
             combined_memory.sort(key=lambda x: x['cost'])
             
+            #rimozione doppiono della memory
             unique_memory = []
             seen_signatures = set()
-
+            
             for ind in combined_memory:
                 sig = tuple(ind['solution']) 
                 if sig not in seen_signatures:
@@ -250,7 +268,7 @@ class Immune_Inspired_Algorithm:
                     break
             self.memory = unique_memory
 
-            #rimozione doppioni
+            #rimozione doppioni dalla popolazione
             unique_pop = []
             seen_pop_sig = set()
             for ind in new_population:
@@ -301,7 +319,7 @@ class Immune_Inspired_Algorithm:
             
             self.history.append((self.evals, self.best_cost_tracker))
             
-            if generation % 5 == 0:
+            if False:#generation % 5 == 0:
                 print(f"Gen {generation} | FE: {self.evals}/{self.max_evals} | Pop_Best: {self.population[0]['cost']} | MEMORY_BEST: {self.memory[0]['cost']}")
 
         print(f"\nRicerca completata! Miglior costo finale (Memory Cell): {self.memory[0]['cost']}")
@@ -310,8 +328,8 @@ class Immune_Inspired_Algorithm:
 # COSTANTI GLOBALI
 CARTELLA_ISTANZE = "wvcp-instances" 
 CARTELLA_GRAFICI = "grafici"
-TEST_VELOCE = False 
-FAMIGLIE_TEST = ["vc_200_750"] 
+TEST_VELOCE = True 
+FAMIGLIE_TEST = ["vc_800_10000" ] 
 
 
 def benchmark_targets():
@@ -336,7 +354,7 @@ def istanze_valide(cartella_istanze, targets):
     """Cerca e restituisce la lista dei file validi per il benchmark."""
 
     if not os.path.exists(cartella_istanze):
-        print(f"\n[-] ERRORE CRITICO: La cartella '{cartella_istanze}' non esiste!")
+        print(f"\n ERRORE: La cartella '{cartella_istanze}' non esiste!")
         sys.exit(1)
         
     tutti_i_file = []
@@ -351,12 +369,12 @@ def istanze_valide(cartella_istanze, targets):
     tutti_i_file.sort()
     
     if not tutti_i_file:
-        print(f"\n ERRORE CRITICO: Nessun file corrispondente ai target trovato in '{cartella_istanze}'!")
+        print(f"\n ERRORE: Nessun file corrispondente ai target trovato in '{cartella_istanze}'!")
         sys.exit(1)
         
     return tutti_i_file
 
-def elaborazione_totale(lista_file, cartella_istanze):
+def elaborazione_totale2(lista_file, cartella_istanze):
     """Esegue l'algoritmo su tutte le istanze e raccoglie i dati."""
     print(f" Trovate {len(lista_file)} istanze valide. Inizio elaborazione...\n")
     
@@ -403,6 +421,62 @@ def elaborazione_totale(lista_file, cartella_istanze):
         
     return risultati
 
+def elaborazione_totale(lista_file, cartella_istanze):
+    """Esegue l'algoritmo su tutte le istanze e raccoglie i dati."""
+    print(f" Trovate {len(lista_file)} istanze valide. Inizio elaborazione...\n")
+    
+    risultati = defaultdict(lambda: {
+        'costi': [], 
+        'evals': [], 
+        'best_history': [], 
+        'best_storico_costo': float('inf'),
+        'all_histories': [] 
+    })
+
+    for nome_file in lista_file:
+        percorso_completo = os.path.join(cartella_istanze, nome_file)
+        famiglia = "_".join(nome_file.replace('.txt', '').split('_')[:3])
+            
+        try:
+            istanza = WVCPInstance(filepath=percorso_completo)
+        except Exception as e:
+            print(f" Errore caricamento istanza: {e}")
+            continue
+            
+      
+        # Se è l'istanza grande (LPI), fai 10 run sullo stesso file. 
+        numero_run = 10 if famiglia == "vc_800_10000" else 1
+
+        for run_idx in range(numero_run):
+            if numero_run > 1:
+                print(f" Elaborazione: {nome_file:<20} (Run {run_idx+1}/{numero_run})...", end=" ", flush=True)
+            else:
+                print(f" Elaborazione: {nome_file:<20} ...", end=" ", flush=True)
+            
+            start_time = time.time()
+            # Passiamo l'istanza caricata all'algoritmo
+            algoritmo = Immune_Inspired_Algorithm(istanza, max_evals=20000) 
+            miglior_soluzione = algoritmo.run()
+            elapsed_time = time.time() - start_time
+            
+            costo = miglior_soluzione['cost']
+            evals = algoritmo.convergence_eval
+            
+            # Salviamo i risultati. Essendo la stessa 'famiglia', si accumuleranno tutti e 10
+            risultati[famiglia]['costi'].append(costo)
+            risultati[famiglia]['evals'].append(evals)
+            
+            # Salviamo la storia di convergenza per il grafico
+            risultati[famiglia]['all_histories'].append(algoritmo.history.copy())
+            
+            if costo < risultati[famiglia]['best_storico_costo']:
+                risultati[famiglia]['best_storico_costo'] = costo
+                risultati[famiglia]['best_history'] = algoritmo.history.copy()
+            
+            print(f"Fatto! Costo: {costo:.1f} | FE: {evals} | Tempo: {elapsed_time:.2f}s")
+        
+    return risultati
+
 def report_testuale(risultati, targets):
 
     print("\n\n" + "#"*80)
@@ -431,7 +505,7 @@ def report_testuale(risultati, targets):
 
 def grafici_convergenza(risultati, cartella_grafici):
     """Genera i plot con tutte le run, la media e la run migliore."""
-    print("\n[*] Generazione dei grafici di convergenza in corso...")
+    print("\n Generazione dei grafici di convergenza in corso...")
     os.makedirs(cartella_grafici, exist_ok=True)
 
     for famiglia, dati in risultati.items():
@@ -442,7 +516,7 @@ def grafici_convergenza(risultati, cartella_grafici):
 
         plt.figure(figsize=(10, 6)) # Leggermente allargato per comodità
 
-        # 1. Trova la lunghezza massima dell'asse X (FE) per poter calcolare la media
+        #Trova la lunghezza massima dell'asse X (FE) per poter calcolare la media
         max_fe = 0
         for storia in tutte_le_storie:
             if storia:
@@ -456,11 +530,10 @@ def grafici_convergenza(risultati, cartella_grafici):
         y_somma = np.zeros(500)
         run_valide = 0
 
-        # === MODIFICA QUI: Generazione dei colori ===
         # Prendiamo 10 colori distinti dalla palette 'tab10'
         colori_run = plt.cm.tab10(np.linspace(0, 1, 10))
 
-        # 2. DISEGNA LE SINGOLE RUN
+        #DISEGNA LE SINGOLE RUN
         for i, storia in enumerate(tutte_le_storie):
             if not storia:
                 continue
@@ -471,7 +544,6 @@ def grafici_convergenza(risultati, cartella_grafici):
             label_singola = 'Singole Run' if i == 0 else ""
             
             # Assegniamo un colore diverso ad ogni run usando l'indice 'i'
-            # (Usiamo il modulo % 10 nel caso in cui ci siano più di 10 run)
             colore_corrente = colori_run[i % 10]
             
             # Traccia la singola run
@@ -482,7 +554,7 @@ def grafici_convergenza(risultati, cartella_grafici):
             y_somma += y_interp
             run_valide += 1
 
-        # 3. CALCOLA E DISEGNA LA MEDIA GLOBALE
+        #CALCOLA E DISEGNA LA MEDIA GLOBALE
         if run_valide > 0:
             y_media = y_somma / run_valide
             # Usiamo un rosso scuro (#d62728) tratteggiato e più spesso per far risaltare la media
@@ -584,4 +656,4 @@ def main():
     genera_grafici_riassuntivi(risultati_finali, targets, CARTELLA_GRAFICI)
 
 if __name__ == "__main__":
-    main()
+     main()
